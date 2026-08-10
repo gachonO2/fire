@@ -1,0 +1,24 @@
+{
+  "hosting": {
+    "public": "frontend",
+    "ignore": ["**/.*", "**/node_modules/**"],
+    "rewrites": [
+      {
+        "source": "/api/**",
+        "run": {
+          "serviceId": "fire-evac-backend",
+          "region": "asia-northeast3"
+        }
+      }
+    ],
+    "headers": [
+      {
+        "source": "/api/**",
+        "headers": [{ "key": "Cache-Control", "value": "no-store" }]
+      }
+    ]
+  },
+  "firestore": {
+    "rules": "firestore.rules"
+  }
+}

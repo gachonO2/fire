@@ -1,0 +1,9 @@
+node_modules/
+.env
+backend/serviceAccountKey.json
+
+# shared/ 에서 자동 복사되는 사본 (npm run sync)
+frontend/shared/
+
+# 참고용으로 클론한 오픈소스 원본
+vendor/

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#111114" />
+  <title>대피 안내 — 시각장애인 실내 대피 내비게이션</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="manifest" href="manifest.json" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>실내 대피 안내</h1>
+    <span id="mode-badge" class="badge" aria-live="polite">연결 중…</span>
+  </header>
+
+  <!-- ─────────────── 시작 화면 ─────────────── -->
+  <main id="screen-start" class="screen">
+    <section aria-labelledby="start-title">
+      <h2 id="start-title">현재 위치를 알려주세요</h2>
+      <p class="hint">비콘·정밀측위는 다음 단계 — MVP에서는 QR 또는 직접 선택으로 시작 위치를 확정합니다.</p>
+
+      <button id="btn-qr" class="big-btn secondary">📷 QR 코드로 위치 확인</button>
+      <video id="qr-video" hidden playsinline muted aria-hidden="true"></video>
+
+      <h3>또는 목록에서 선택</h3>
+      <div id="start-picker" class="picker" role="group" aria-label="시작 위치 선택"></div>
+
+      <button id="btn-start" class="big-btn primary" disabled>🚨 대피 시작</button>
+    </section>
+
+    <!-- 보호자 연동: 대피가 시작되면 보호자 화면에 내 위치가 실시간으로 표시된다 -->
+    <section class="guardian-setup" aria-labelledby="guardian-title">
+      <h3 id="guardian-title">👨‍👩‍👧 보호자에게 내 위치 공유</h3>
+      <p class="hint">미리 등록해 두면 화재로 대피가 시작될 때 보호자 화면에 내 위치·경로·안내 내용이 실시간으로 표시됩니다.</p>
+
+      <label for="guardian-name">보호자 이름</label>
+      <input id="guardian-name" type="text" autocomplete="name" placeholder="예: 김보호" />
+
+      <label for="guardian-contact">연락처</label>
+      <input id="guardian-contact" type="tel" autocomplete="tel" placeholder="예: 010-0000-0000" />
+
+      <button id="btn-guardian-save" class="big-btn secondary">보호자 등록</button>
+
+      <div id="guardian-result" hidden aria-live="polite">
+        <p class="guardian-ok">✅ <strong id="guardian-saved-name"></strong> 님에게 공유됩니다.</p>
+        <p class="hint">보호자에게 아래 링크(또는 코드)를 보내세요.</p>
+        <p class="guardian-code">코드 <strong id="guardian-code"></strong></p>
+        <input id="guardian-link" type="text" readonly aria-label="보호자 공유 링크" />
+        <div class="actions">
+          <button id="btn-copy-link" class="big-btn secondary">🔗 링크 복사</button>
+          <a id="btn-open-guardian" class="big-btn secondary" target="_blank" rel="noopener">보호자 화면 열기</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ─────────────── 안내 화면 ─────────────── -->
+  <main id="screen-guide" class="screen" hidden>
+    <!-- 핵심: 스크린리더가 즉시 읽는 명령 카드 -->
+    <section class="command-card" aria-live="assertive" aria-atomic="true">
+      <p id="command-text">안내를 준비하고 있습니다…</p>
+    </section>
+
+    <section class="kpis" aria-label="대피 상태">
+      <div class="kpi"><span class="kpi-label">목표 출구</span><strong id="kpi-exit">-</strong></div>
+      <div class="kpi"><span class="kpi-label">다음 지점까지</span><strong id="kpi-steps">-</strong></div>
+      <div class="kpi"><span class="kpi-label">위치 확신도</span><strong id="kpi-conf">100%</strong></div>
+      <div class="kpi"><span class="kpi-label">경로 계산</span><strong id="kpi-recalc">-</strong></div>
+      <div class="kpi wide"><span class="kpi-label">상태</span><strong id="kpi-status">대피 중</strong></div>
+    </section>
+
+    <div class="actions">
+      <button id="btn-repeat" class="big-btn secondary">🔊 다시 듣기</button>
+      <button id="btn-sos" class="big-btn danger">🆘 구조요청</button>
+    </div>
+
+    <section class="map-wrap" aria-hidden="true">
+      <h3>동행 안전요원용 지도</h3>
+      <svg id="minimap" class="minimap" role="img"></svg>
+    </section>
+
+    <details class="demo-panel">
+      <summary>워크스루 데모 조작 (센서 없는 환경용)</summary>
+      <div class="actions">
+        <button id="btn-step" class="big-btn secondary">👣 한 걸음</button>
+        <button id="btn-auto" class="big-btn secondary" aria-pressed="false">자동 이동 (데모)</button>
+        <button id="btn-deviate" class="big-btn secondary">↯ 경로 이탈 재현</button>
+      </div>
+      <p class="hint">휴대폰에서는 걸음 센서(devicemotion)와 나침반으로 자동 추적됩니다.</p>
+    </details>
+
+    <button id="btn-restart" class="big-btn secondary" hidden>처음으로</button>
+  </main>
+
+  <script type="module" src="js/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+  </script>
+</body>
+</html>

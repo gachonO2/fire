@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#111114" />
+  <title>보호자 화면 — 대피 상황 확인</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="manifest" href="manifest.json" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>👨‍👩‍👧 보호자 화면</h1>
+    <span id="mode-badge" class="badge">연결 중…</span>
+  </header>
+
+  <!-- 코드 입력 (링크에 code가 없을 때) -->
+  <main id="screen-code" class="screen" hidden>
+    <h2>보호자 코드를 입력하세요</h2>
+    <p class="hint">대피 안내 앱에서 발급된 6자리 코드입니다.</p>
+    <input id="code-input" type="text" maxlength="6" autocapitalize="characters"
+           class="code-field" aria-label="보호자 코드" placeholder="ABC123" />
+    <button id="btn-code-submit" class="big-btn primary">확인</button>
+    <p id="code-error" class="code-error" hidden role="alert"></p>
+  </main>
+
+  <!-- 대상자 상황 -->
+  <main id="screen-watch" class="screen" hidden>
+    <section id="alert-banner" class="alert-banner idle" aria-live="assertive">
+      <strong id="alert-title">대기 중</strong>
+      <span id="alert-detail">아직 대피가 시작되지 않았습니다.</span>
+    </section>
+
+    <section class="kpis" aria-label="대피 상황">
+      <div class="kpi wide"><span class="kpi-label">현재 위치</span><strong id="g-location">-</strong></div>
+      <div class="kpi"><span class="kpi-label">목표 출구</span><strong id="g-exit">-</strong></div>
+      <div class="kpi"><span class="kpi-label">다음 지점까지</span><strong id="g-steps">-</strong></div>
+      <div class="kpi"><span class="kpi-label">위치 확신도</span><strong id="g-conf">-</strong></div>
+      <div class="kpi"><span class="kpi-label">마지막 갱신</span><strong id="g-updated">-</strong></div>
+    </section>
+
+    <section class="panel" style="margin-bottom:14px">
+      <h2>현재 받고 있는 안내</h2>
+      <p id="g-command" class="g-command">-</p>
+    </section>
+
+    <section class="map-wrap">
+      <h3>층 지도</h3>
+      <svg id="guardian-map" class="minimap" role="img" aria-label="대피자 위치 지도"></svg>
+      <p class="hint">🔵 대상자 위치 · 🟢 안내 중인 경로 · 🔴 위험 통로</p>
+    </section>
+
+    <section class="panel" style="margin-top:14px">
+      <h2>상황 기록</h2>
+      <ul id="g-alerts" class="list"><li class="empty">아직 없음</li></ul>
+    </section>
+
+    <button id="btn-notify" class="big-btn secondary">🔔 알림 허용</button>
+  </main>
+
+  <script type="module" src="js/guardian.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+  </script>
+</body>
+</html>

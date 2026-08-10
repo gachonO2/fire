@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>도면 편집기 — 건물 설계도 주입</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>📐 도면 편집기</h1>
+    <nav class="topnav">
+      <a href="admin.html">🧯 관제</a>
+      <span id="mode-badge" class="badge">연결 중…</span>
+    </nav>
+  </header>
+
+  <div class="architect-layout">
+    <!-- 캔버스 -->
+    <section class="panel">
+      <h2>도면 위에 대피 경로 그리기</h2>
+      <p class="hint" id="editor-hint">
+        ① 도면 이미지를 올리고 ② 실제 가로 폭(m)을 입력한 뒤
+        ③ 도면을 클릭해 지점을 찍고 ④ 두 지점을 이어 통로를 만듭니다.
+      </p>
+
+      <div class="hazard-tools" role="group" aria-label="편집 도구">
+        <button class="tool-btn" data-mode="node" aria-pressed="true">📍 지점 추가</button>
+        <button class="tool-btn" data-mode="edge" aria-pressed="false">🔗 통로 연결</button>
+        <button class="tool-btn" data-mode="move" aria-pressed="false">✋ 지점 이동</button>
+        <button class="tool-btn" data-mode="delete" aria-pressed="false">🗑️ 삭제</button>
+      </div>
+
+      <p class="hint" id="mode-hint">도면을 클릭하면 지점이 추가됩니다.</p>
+
+      <svg id="editor-map" class="minimap editor-map" role="img" aria-label="도면 편집 캔버스"></svg>
+
+      <div id="validation" class="validation" hidden></div>
+    </section>
+
+    <!-- 사이드 패널 -->
+    <div>
+      <section class="panel" style="margin-bottom:16px">
+        <h2>1. 도면 이미지</h2>
+        <input id="image-input" type="file" accept="image/*" />
+        <p class="hint">업로드 시 자동으로 축소·압축됩니다 (900KB 이하). 이미지 없이 그려도 됩니다.</p>
+
+        <label for="floor-width">이 층의 실제 가로 폭 (m)</label>
+        <input id="floor-width" type="number" min="1" step="0.5" value="40" />
+        <p class="hint" id="scale-info">축척을 정확히 넣어야 걸음 수 안내가 맞습니다.</p>
+      </section>
+
+      <section class="panel" style="margin-bottom:16px">
+        <h2>2. 도면 정보</h2>
+        <label for="plan-id">도면 ID (영문·숫자)</label>
+        <input id="plan-id" type="text" placeholder="hospital-4f" />
+        <label for="plan-name">이름</label>
+        <input id="plan-name" type="text" placeholder="병원 4층" />
+        <label for="step-length">평균 보폭 (m)</label>
+        <input id="step-length" type="number" min="0.3" max="1.2" step="0.05" value="0.7" />
+      </section>
+
+      <section class="panel" style="margin-bottom:16px">
+        <h2>3. 선택한 항목</h2>
+        <div id="inspector"><p class="hint">지점이나 통로를 선택하세요.</p></div>
+      </section>
+
+      <section class="panel" style="margin-bottom:16px">
+        <h2>4. 저장</h2>
+        <button id="btn-save" class="big-btn primary">💾 도면 저장</button>
+        <button id="btn-activate" class="big-btn secondary">✅ 이 도면으로 안내 시작</button>
+        <div class="actions">
+          <button id="btn-export" class="big-btn secondary">⬇ JSON 내보내기</button>
+          <button id="btn-import" class="big-btn secondary">⬆ JSON 가져오기</button>
+        </div>
+        <input id="import-file" type="file" accept="application/json,.json" hidden />
+        <p id="save-status" class="hint"></p>
+      </section>
+
+      <section class="panel">
+        <h2>등록된 도면</h2>
+        <ul id="plan-list" class="list"><li class="empty">불러오는 중…</li></ul>
+      </section>
+    </div>
+  </div>
+
+  <script type="module" src="js/architect.js"></script>
+</body>
+</html>

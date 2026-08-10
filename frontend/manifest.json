@@ -1,0 +1,18 @@
+{
+  "name": "실내 대피 안내 — 시각장애인 AI 내비게이션",
+  "short_name": "대피안내",
+  "description": "재난 시 연기·혼잡·장애물을 피해 접근 가능한 경로를 음성·진동으로 안내",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#111114",
+  "theme_color": "#111114",
+  "lang": "ko",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

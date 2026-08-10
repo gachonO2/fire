@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "백엔드 실행·디버그",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/backend/src/server.js",
+      "cwd": "${workspaceFolder}",
+      "env": { "PORT": "8080" },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "백엔드 API 테스트",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/backend/test/api.test.mjs",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "경로탐색 시나리오 테스트",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/test/route.test.mjs",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ]
+}
