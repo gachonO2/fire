@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>통합 시연 — 사용자 · 관제 · 보호자</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body class="demo-body">
+  <header class="topbar">
+    <h1>🧯 통합 시연</h1>
+    <nav class="topnav">
+      <span id="guardian-code-badge" class="badge">보호자 연결 중…</span>
+      <button id="btn-reset" class="tool-btn">↺ 시나리오 초기화</button>
+      <a href="architect.html">📐 도면 편집기</a>
+      <span id="mode-badge" class="badge">연결 중…</span>
+    </nav>
+  </header>
+
+  <div class="demo-grid">
+    <section class="demo-panel">
+      <div class="demo-panel-head">
+        <strong>① 사용자</strong>
+        <span>시각장애인 대피 안내 — 위치 선택 후 대피 시작</span>
+        <button class="demo-expand" data-target="frame-user" title="크게 보기">⤢</button>
+      </div>
+      <iframe id="frame-user" title="사용자 앱" allow="camera; microphone"></iframe>
+    </section>
+
+    <section class="demo-panel">
+      <div class="demo-panel-head">
+        <strong>② 관제</strong>
+        <span>통로 클릭으로 화재·연기·온도 주입</span>
+        <button class="demo-expand" data-target="frame-admin" title="크게 보기">⤢</button>
+      </div>
+      <iframe id="frame-admin" title="관제 대시보드" src="admin.html"></iframe>
+    </section>
+
+    <section class="demo-panel">
+      <div class="demo-panel-head">
+        <strong>③ 보호자</strong>
+        <span>대피 시작 시 위치·경로·안내가 실시간 표시</span>
+        <button class="demo-expand" data-target="frame-guardian" title="크게 보기">⤢</button>
+      </div>
+      <iframe id="frame-guardian" title="보호자 화면"></iframe>
+    </section>
+  </div>
+
+  <details class="demo-log" open>
+    <summary>실시간 이벤트 로그 — 세 화면 사이에 오가는 신호</summary>
+    <ul id="event-log" class="list"><li class="empty">대기 중…</li></ul>
+  </details>
+
+  <script type="module" src="js/demo.js"></script>
+</body>
+</html>

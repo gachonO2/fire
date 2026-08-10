@@ -295,6 +295,100 @@ h3 { font-size: 1.05rem; margin: 18px 0 8px; color: var(--text-dim); }
 .topnav a { color: var(--text-dim); text-decoration: none; font-size: 0.9rem; }
 .topnav a:hover { color: var(--text); }
 
+/* ───────── 통합 시연 화면 ───────── */
+.demo-body {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.demo-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  padding: 12px;
+}
+
+@media (max-width: 1200px) { .demo-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 760px)  { .demo-grid { grid-template-columns: 1fr; } }
+
+.demo-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border: 1px solid #2e2e36;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.demo-panel.expanded { grid-column: 1 / -1; }
+.demo-panel.hidden { display: none; }
+
+.demo-panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid #2e2e36;
+}
+
+.demo-panel-head strong { font-size: 0.95rem; }
+.demo-panel-head span {
+  flex: 1;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.demo-expand {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.demo-expand:hover { background: var(--secondary); color: var(--text); }
+
+.demo-panel iframe {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: var(--bg);
+}
+
+.demo-log {
+  flex-shrink: 0;
+  max-height: 34vh;
+  overflow: auto;
+  background: var(--surface);
+  border-top: 1px solid #2e2e36;
+  padding: 10px 16px 14px;
+}
+
+.demo-log summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 0.88rem;
+  margin-bottom: 8px;
+}
+
+.demo-log .list li { font-size: 0.85rem; padding: 5px 2px; }
+.demo-log .time { margin-right: 8px; font-variant-numeric: tabular-nums; }
+
+.log-danger { color: var(--danger); }
+.log-warn { color: #ffb224; }
+.log-info { color: var(--text); }
+
 /* 온도 시뮬레이션 */
 .temp-controls {
   margin-bottom: 12px;
