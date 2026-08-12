@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 36">
+  <rect width="40" height="36" fill="#eceff1"/>
+  <g fill="#f8fafb" stroke="#334047" stroke-width="0.55">
+    <rect x="1" y="1" width="38" height="34"/>
+    <rect x="2.5" y="2.5" width="8" height="8"/><rect x="29.5" y="2.5" width="8" height="8"/>
+    <rect x="2.5" y="12" width="8" height="7"/><rect x="29.5" y="12" width="8" height="7"/>
+    <rect x="2.5" y="21" width="8" height="12.5"/><rect x="29.5" y="21" width="8" height="12.5"/>
+  </g>
+  <g fill="none" stroke="#bdc5ca" stroke-width="4.5" stroke-linecap="square" stroke-linejoin="round">
+    <path d="M20 32V24V15H7M20 24L7 15M20 24L33 15M20 15H33"/>
+    <path d="M7 15L3 3M33 15L37 3"/>
+  </g>
+  <g stroke="#59686f" stroke-width="0.22" fill="none">
+    <path d="M12 29h16M12 31h16" stroke-dasharray="0.5 0.35"/>
+    <path d="M12 5h16M12 7h16" stroke-dasharray="0.5 0.35"/>
+    <path d="M4 23h5M31 23h5"/>
+  </g>
+  <g fill="#3d4c53" font-family="sans-serif" font-size="0.95" text-anchor="middle">
+    <text x="6.5" y="6">서편 계단</text><text x="33.5" y="6">동편 계단</text>
+    <text x="6.5" y="15.5">매표기</text><text x="33.5" y="15.5">고객센터</text>
+    <text x="6.5" y="27">상가</text><text x="33.5" y="27">화장실</text>
+    <text x="20" y="28.5">개찰구</text><text x="20" y="11.5">환승 통로</text>
+  </g>
+  <g fill="#6d7c83" font-family="sans-serif" font-size="0.78">
+    <text x="2.2" y="34.3">STATION CONCOURSE B1</text><text x="36" y="2.2" font-size="1.2">N ↑</text>
+  </g>
+</svg>

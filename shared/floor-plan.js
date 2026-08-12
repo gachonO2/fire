@@ -11,6 +11,9 @@
 
 export const NODE_TYPES = ['room', 'junction', 'exit', 'elevator', 'stair'];
 
+/** 장소 설명 최대 길이 — 음성으로 읽히므로 짧아야 한다 */
+export const MAX_DESCRIPTION = 200;
+
 export class FloorPlan {
   constructor(plan) {
     this.plan = plan;
@@ -63,9 +66,51 @@ export class FloorPlan {
     return this.plan.nodes.filter(n => n.type === 'exit');
   }
 
+  /**
+   * 저장된 장소 설명을 음성 안내용 문장으로 만든다.
+   * 도면을 등록할 때 적어 둔 설명·단서가 여기서 쓰인다 —
+   * 시각장애인 사용자가 "지금 내가 어디인지"를 물었을 때 답이 되는 정보다.
+   */
+  describePlace(nodeId) {
+    const n = this._nodes.get(nodeId);
+    if (!n) return null;
+    const parts = [`여기는 ${n.name}입니다.`];
+    if (n.description?.trim()) parts.push(n.description.trim());
+    if (n.landmark?.trim()) parts.push(n.landmark.trim());
+    return parts.join(' ');
+  }
+
+  /** 설명이 저장된 장소만 */
+  describedPlaces() {
+    return this.plan.nodes.filter(n => n.description?.trim() || n.landmark?.trim());
+  }
+
   /** 특정 노드에 연결된 모든 통로 — 노드 단위 센서가 과열되면 여기를 전부 막는다 */
   edgesAtNode(nodeId) {
     return this.plan.edges.filter(e => e.a === nodeId || e.b === nodeId);
+  }
+
+  /**
+   * 도면 좌표에 가장 가까운 장소.
+   * 화재는 임의 좌표에서 나므로, 사용자에게 "어디에 불이 났는지" 말하려면
+   * 그 좌표를 사람이 아는 이름으로 바꿔야 한다 — "북측 복도 교차점 부근".
+   */
+  nearestPlace(x, y) {
+    let best = null;
+    for (const n of this.plan.nodes) {
+      const d = Math.hypot(n.x - x, n.y - y);
+      if (!best || d < best.distance) best = { node: n, distance: d };
+    }
+    if (!best) return null;
+    return { node: best.node, meters: best.distance * this.metersPerUnit };
+  }
+
+  /** 두 장소 사이 직선 거리(m) — "얼마나 떨어져 있는지" 말할 때 쓴다 */
+  straightDistance(fromId, toId) {
+    const a = this._nodes.get(fromId);
+    const b = this._nodes.get(toId);
+    if (!a || !b) return null;
+    return Math.hypot(b.x - a.x, b.y - a.y) * this.metersPerUnit;
   }
 
   /** 서버가 엣지를 ID 배열로 보내온 경로를 엣지 객체 경로로 복원 */
@@ -96,6 +141,16 @@ export function validatePlan(plan) {
     ids.add(n.id);
     if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) errors.push(`좌표가 잘못된 노드: ${n.id}`);
     if (n.type && !NODE_TYPES.includes(n.type)) errors.push(`알 수 없는 노드 유형: ${n.id} (${n.type})`);
+
+    // 장소 설명은 음성으로 읽히므로 너무 길면 재난 상황에서 쓸 수 없다
+    for (const field of ['description', 'landmark']) {
+      const v = n[field];
+      if (v == null) continue;
+      if (typeof v !== 'string') errors.push(`${n.id}의 ${field}는 문자열이어야 합니다.`);
+      else if (v.length > MAX_DESCRIPTION) {
+        errors.push(`${n.id}의 설명이 너무 깁니다 (${v.length}자 / 최대 ${MAX_DESCRIPTION}자)`);
+      }
+    }
   }
 
   const edgeIds = new Set();

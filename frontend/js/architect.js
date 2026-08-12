@@ -13,7 +13,7 @@
 
 import { Api } from './api.js';
 import { renderMap } from './minimap.js';
-import { FloorPlan, validatePlan, findUnreachableNodes, NODE_TYPES } from '../shared/floor-plan.js';
+import { FloorPlan, validatePlan, findUnreachableNodes, NODE_TYPES, MAX_DESCRIPTION } from '../shared/floor-plan.js';
 
 const $ = id => document.getElementById(id);
 
@@ -275,6 +275,66 @@ function draw() {
   svg.onpointerup = () => { if (state.dragging) { state.dragging = null; validate(); } };
 
   renderInspector();
+  renderPlaceList();
+}
+
+/** 저장된 장소 목록 — 설명이 적힌 곳과 아직 안 적은 곳을 함께 보여준다 */
+function renderPlaceList() {
+  const ul = $('place-list');
+  const floorPlan = new FloorPlan(state.plan);
+  const described = floorPlan.describedPlaces().length;
+
+  $('place-count').textContent = `${described} / ${state.plan.nodes.length}`;
+
+  if (!state.plan.nodes.length) {
+    ul.innerHTML = '<li class="empty">아직 없음 — 도면을 클릭해 장소를 추가하세요.</li>';
+    return;
+  }
+
+  ul.innerHTML = state.plan.nodes.map(n => {
+    const hasDesc = Boolean(n.description?.trim() || n.landmark?.trim());
+    const detail = hasDesc
+      ? escapeHtml(floorPlan.describePlace(n.id))
+      : '설명 없음 — 선택해서 적어주세요';
+    return `<li>
+      <button class="place-item ${hasDesc ? 'described' : ''}" data-place="${n.id}">
+        <strong>${hasDesc ? '설명 있음 · ' : ''}${escapeHtml(n.name)}</strong>
+        <span>${NODE_TYPE_LABELS[n.type] || n.type}</span>
+        <div class="time">${detail}</div>
+      </button>
+      <div class="actions-inline">
+        <button class="tool-btn" data-tag="${n.id}">태그 주소 복사</button>
+      </div>
+    </li>`;
+  }).join('');
+
+  ul.querySelectorAll('[data-place]').forEach(btn => {
+    btn.addEventListener('click', () => select('node', btn.dataset.place));
+  });
+  ul.querySelectorAll('[data-tag]').forEach(btn => {
+    btn.addEventListener('click', () => copyTagUrl(btn.dataset.tag));
+  });
+}
+
+/**
+ * 이 장소의 안내 태그 주소.
+ *
+ * 벽·문틀에 붙이는 NFC 태그나 QR에 이 주소를 넣으면, 사용자가 폰을 대는 순간
+ * 앱이 열리면서 **위치가 자동으로 확정된다.** 자동 위치 확인은 이 태그가 있어야 성립한다.
+ */
+function tagUrl(nodeId) {
+  const base = location.href.replace(/architect\.html.*$/, 'index.html');
+  return `${base}?at=${encodeURIComponent(nodeId)}`;
+}
+
+async function copyTagUrl(nodeId) {
+  const url = tagUrl(nodeId);
+  try {
+    await navigator.clipboard.writeText(url);
+    setStatus(`태그 주소를 복사했습니다 — NFC 태그나 QR에 넣으세요: ${url}`);
+  } catch (_) {
+    setStatus(`태그 주소: ${url}`);
+  }
 }
 
 function nearestNode(x, y, floorPlan) {
@@ -327,17 +387,44 @@ function renderInspector() {
     const node = state.plan.nodes.find(n => n.id === state.selected.id);
     if (!node) { box.innerHTML = '<p class="hint">선택 항목이 없습니다.</p>'; return; }
     box.innerHTML = `
-      <label>지점 이름 (음성으로 읽힙니다)</label>
-      <input id="ins-name" type="text" value="${escapeHtml(node.name)}" />
+      <label>장소 이름 (음성으로 읽힙니다)</label>
+      <input id="ins-name" type="text" value="${escapeHtml(node.name)}" placeholder="301호 진료실 앞" />
+
       <label>유형</label>
       <select id="ins-type">
         ${NODE_TYPES.map(t => `<option value="${t}" ${t === node.type ? 'selected' : ''}>${NODE_TYPE_LABELS[t]}</option>`).join('')}
       </select>
-      <p class="hint">좌표 ${node.x}, ${node.y} · id ${node.id}</p>
-      <button id="ins-delete" class="tool-btn">🗑️ 이 지점 삭제</button>`;
 
-    $('ins-name').addEventListener('input', e => { node.name = e.target.value; });
+      <label for="ins-desc">장소 설명 <span class="hint-inline">사용자가 “여기가 어디인가요?”를 누르면 읽어줍니다</span></label>
+      <textarea id="ins-desc" rows="2" maxlength="${MAX_DESCRIPTION}"
+        placeholder="복도가 좌우로 갈라지는 곳입니다.">${escapeHtml(node.description || '')}</textarea>
+
+      <label for="ins-landmark">촉각·소리 단서 <span class="hint-inline">손으로 짚거나 귀로 확인할 수 있는 것</span></label>
+      <textarea id="ins-landmark" rows="2" maxlength="${MAX_DESCRIPTION}"
+        placeholder="오른쪽 벽에 손잡이가 있고, 정면에서 안내데스크 소리가 들립니다.">${escapeHtml(node.landmark || '')}</textarea>
+
+      <p class="hint"><em id="ins-preview"></em></p>
+      <p class="hint">좌표 ${node.x}, ${node.y} · id ${node.id}</p>
+      <button id="ins-delete" class="tool-btn">이 장소 삭제</button>`;
+
+    const refreshPreview = () => {
+      $('ins-preview').textContent = new FloorPlan(state.plan).describePlace(node.id);
+    };
+    refreshPreview();
+
+    $('ins-name').addEventListener('input', e => {
+      node.name = e.target.value;
+      refreshPreview();
+      renderPlaceList();
+    });
     $('ins-type').addEventListener('change', e => { node.type = e.target.value; draw(); validate(); });
+    for (const [id, field] of [['ins-desc', 'description'], ['ins-landmark', 'landmark']]) {
+      $(id).addEventListener('input', e => {
+        node[field] = e.target.value;
+        refreshPreview();
+        renderPlaceList();
+      });
+    }
     $('ins-delete').addEventListener('click', () => deleteNode(node.id));
     return;
   }
@@ -346,7 +433,7 @@ function renderInspector() {
   if (!edge) { box.innerHTML = '<p class="hint">선택 항목이 없습니다.</p>'; return; }
   const floorPlan = new FloorPlan(state.plan);
   box.innerHTML = `
-    <p><strong>${edge.a} ↔ ${edge.b}</strong> (${edge.id})</p>
+    <p><strong>${edge.a}에서 ${edge.b}</strong> (${edge.id})</p>
     <p class="hint">길이 ${floorPlan.edgeLength(edge).toFixed(1)}m · 약 ${floorPlan.edgeSteps(edge)}걸음</p>
     <label>따라갈 벽 (진행 방향 기준)</label>
     <select id="ins-wall">
@@ -355,7 +442,7 @@ function renderInspector() {
       <option value="right" ${edge.wall === 'right' ? 'selected' : ''}>오른쪽 벽</option>
     </select>
     <label><input id="ins-elevator" type="checkbox" ${edge.elevator ? 'checked' : ''} /> 엘리베이터 구간 (화재 시 제외)</label>
-    <button id="ins-delete" class="tool-btn">🗑️ 이 통로 삭제</button>`;
+    <button id="ins-delete" class="tool-btn">이 통로 삭제</button>`;
 
   $('ins-wall').addEventListener('change', e => { edge.wall = e.target.value || null; });
   $('ins-elevator').addEventListener('change', e => { edge.elevator = e.target.checked; draw(); });
@@ -383,8 +470,8 @@ function validate() {
   box.hidden = false;
   box.className = `validation ${errors.length ? 'error' : 'warn'}`;
   box.innerHTML = [
-    ...errors.map(e => `<div>❌ ${escapeHtml(e)}</div>`),
-    ...warnings.map(w => `<div>⚠️ ${escapeHtml(w)}</div>`),
+    ...errors.map(e => `<div>오류: ${escapeHtml(e)}</div>`),
+    ...warnings.map(w => `<div>주의: ${escapeHtml(w)}</div>`),
   ].join('');
   return errors.length === 0;
 }

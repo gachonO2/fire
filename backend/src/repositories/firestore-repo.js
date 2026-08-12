@@ -53,6 +53,7 @@ export class FirestoreRepo {
     });
 
     this._watch('sensors', snap => publish('sensors', snap.docs.map(d => d.data())));
+    this._watch('fires', snap => publish('fires', snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 
     // 도면이 하나도 없으면 기본 시연 도면을 넣어 둔다
     const plans = await this.db.collection('plans').limit(1).get();
@@ -115,9 +116,10 @@ export class FirestoreRepo {
     const plan = await this.getPlan(planId);
     if (!plan) return null;
     await this.db.collection('config').doc('settings').set({ activePlanId: planId }, { merge: true });
-    // 도면이 바뀌면 이전 도면의 통로 ID로 걸려 있던 위험은 의미가 없다
+    // 도면이 바뀌면 이전 도면의 통로 ID·좌표로 걸려 있던 위험은 의미가 없다
     await this.resetHazards();
     await this.clearSensors();
+    await this.clearFires();
     publish('plan', plan);
     return plan;
   }
@@ -149,6 +151,35 @@ export class FirestoreRepo {
 
   async clearSensors() {
     const snap = await this.db.collection('sensors').get();
+    const batch = this.db.batch();
+    snap.forEach(d => batch.delete(d.ref));
+    await batch.commit();
+  }
+
+  // ------------------------------------------------------------------ fires
+  async getFires() {
+    const snap = await this.db.collection('fires').get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  }
+
+  async addFire({ x, y, radius, label }) {
+    const ref = await this.db.collection('fires').add({ x, y, radius, label, startedAt: Date.now() });
+    return { id: ref.id, x, y, radius, label, startedAt: Date.now() };
+  }
+
+  async updateFire(fireId, patch) {
+    const ref = this.db.collection('fires').doc(fireId);
+    if (!(await ref.get()).exists) return null;
+    await ref.set(patch, { merge: true });
+    return { id: fireId, ...(await ref.get()).data() };
+  }
+
+  async removeFire(fireId) {
+    await this.db.collection('fires').doc(fireId).delete();
+  }
+
+  async clearFires() {
+    const snap = await this.db.collection('fires').get();
     const batch = this.db.batch();
     snap.forEach(d => batch.delete(d.ref));
     await batch.commit();

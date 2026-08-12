@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 36">
+  <rect width="40" height="36" fill="#edf2f5"/>
+  <g fill="#fbfcfd" stroke="#2d3e48" stroke-width="0.55">
+    <rect x="1" y="1" width="38" height="34" rx="0.3"/>
+    <rect x="2.5" y="2.5" width="8" height="7"/><rect x="11" y="2.5" width="8" height="7"/>
+    <rect x="21" y="2.5" width="8" height="7"/><rect x="29.5" y="2.5" width="8" height="7"/>
+    <rect x="2.5" y="11" width="8" height="9"/><rect x="29.5" y="11" width="8" height="9"/>
+    <rect x="2.5" y="21.5" width="12" height="7"/><rect x="25.5" y="21.5" width="12" height="7"/>
+    <rect x="2.5" y="29" width="12" height="4.5"/><rect x="25.5" y="29" width="12" height="4.5"/>
+  </g>
+  <g fill="none" stroke="#b4c4ce" stroke-width="4" stroke-linejoin="round">
+    <path d="M20 32V24V16M20 24L8 10M20 24L32 10M20 16L8 10M20 16L32 10"/>
+    <path d="M8 10L3 3M32 10L37 3"/>
+  </g>
+  <g fill="none" stroke="#5f7480" stroke-width="0.2">
+    <path d="M3 9.8h7M11.5 9.8h7M21.5 9.8h7M30 9.8h7" stroke-dasharray="0.65 0.3"/>
+    <path d="M10.5 15h1.5a1.5 1.5 0 0 1-1.5 1.5M29.5 15H28a1.5 1.5 0 0 0 1.5 1.5"/>
+    <path d="M14.5 25h1.7a1.7 1.7 0 0 1-1.7 1.7M25.5 25h-1.7a1.7 1.7 0 0 0 1.7 1.7"/>
+  </g>
+  <g fill="#3b5260" font-family="sans-serif" font-size="0.95" text-anchor="middle">
+    <text x="6.5" y="6">301 병실</text><text x="15" y="6">302 병실</text><text x="25" y="6">검사실</text><text x="33.5" y="6">처치실</text>
+    <text x="6.5" y="15.5">병실</text><text x="33.5" y="15.5">병실</text>
+    <text x="8.5" y="25.5">간호사실</text><text x="31.5" y="25.5">진료실</text>
+    <text x="8.5" y="31.5">대기실</text><text x="31.5" y="31.5">원무실</text>
+  </g>
+  <g fill="#6b7f89" font-family="sans-serif" font-size="0.78">
+    <text x="2.2" y="34.3">3F HOSPITAL PLAN</text><text x="36" y="2.2" font-size="1.2">N ↑</text>
+  </g>
+</svg>

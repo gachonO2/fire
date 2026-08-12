@@ -9,6 +9,7 @@ import { telemetryRoutes } from './routes/telemetry.routes.js';
 import { guardianRoutes } from './routes/guardians.routes.js';
 import { planRoutes } from './routes/plans.routes.js';
 import { sensorRoutes } from './routes/sensors.routes.js';
+import { fireRoutes } from './routes/fires.routes.js';
 import { streamRoutes } from './routes/stream.routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -32,6 +33,7 @@ export function createApp() {
   app.use('/api', guardianRoutes);
   app.use('/api', planRoutes);
   app.use('/api', sensorRoutes);
+  app.use('/api', fireRoutes);
   app.use('/api', streamRoutes);
 
   // 개발·시연 편의: 백엔드가 프론트도 함께 서빙한다 (동일 출처라 CORS 불필요).

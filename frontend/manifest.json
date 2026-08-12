@@ -1,18 +1,35 @@
 {
   "name": "실내 대피 안내 — 시각장애인 AI 내비게이션",
   "short_name": "대피안내",
-  "description": "재난 시 연기·혼잡·장애물을 피해 접근 가능한 경로를 음성·진동으로 안내",
+  "description": "재난 시 연기·화재·과열을 피해 접근 가능한 경로를 음성·진동으로 안내",
   "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#111114",
-  "theme_color": "#111114",
+  "orientation": "portrait",
+  "background_color": "#0b0b0e",
+  "theme_color": "#0b0b0e",
   "lang": "ko",
+  "dir": "ltr",
+  "categories": ["navigation", "utilities", "health"],
   "icons": [
     {
       "src": "icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
-      "purpose": "any"
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "바로 대피 시작",
+      "short_name": "대피",
+      "description": "마지막으로 확인한 위치에서 바로 안내를 시작합니다",
+      "url": "./index.html?start=1"
+    },
+    {
+      "name": "보호자 화면",
+      "short_name": "보호자",
+      "url": "./guardian.html"
     }
   ]
 }

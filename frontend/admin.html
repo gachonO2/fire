@@ -8,10 +8,10 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>🧯 관제 대시보드</h1>
+    <h1>관제 대시보드</h1>
     <nav class="topnav">
-      <a href="demo.html">🖥️ 통합 시연</a>
-      <a href="architect.html">📐 도면 편집기</a>
+      <a href="demo.html">시연 콘솔</a>
+      <a href="architect.html">도면 편집기</a>
       <span id="mode-badge" class="badge">연결 중…</span>
     </nav>
   </header>
@@ -22,12 +22,20 @@
       <p class="hint" id="building-info">도면을 불러오는 중…</p>
 
       <div class="hazard-tools" role="group" aria-label="적용할 도구">
-        <button class="tool-btn" data-tool="fire" aria-pressed="false">🔥 화재</button>
-        <button class="tool-btn" data-tool="smoke" aria-pressed="true">💨 연기</button>
-        <button class="tool-btn" data-tool="crowd" aria-pressed="false">👥 혼잡</button>
-        <button class="tool-btn" data-tool="temp" aria-pressed="false">🌡️ 온도</button>
-        <button class="tool-btn" data-tool="clear" aria-pressed="false">✅ 해제</button>
-        <button class="tool-btn" id="btn-reset">↺ 시나리오 초기화</button>
+        <button class="tool-btn" data-tool="ignite" aria-pressed="true">화재 발생</button>
+        <button class="tool-btn" data-tool="smoke" aria-pressed="false">연기</button>
+        <button class="tool-btn" data-tool="crowd" aria-pressed="false">혼잡</button>
+        <button class="tool-btn" data-tool="temp" aria-pressed="false">온도</button>
+        <button class="tool-btn" data-tool="clear" aria-pressed="false">해제</button>
+        <button class="tool-btn" id="btn-reset">시나리오 초기화</button>
+      </div>
+
+      <div id="fire-controls" class="temp-controls">
+        <label for="fire-radius">화재 반경 <strong id="fire-radius-readout">6m</strong></label>
+        <input id="fire-radius" type="range" min="2" max="25" step="1" value="6" />
+        <p class="hint"><strong>지도의 아무 곳이나 클릭하면 그 자리에 불이 납니다.</strong>
+          반경 안에 걸리는 통로는 모두 막히고, 사용자 앱이 즉시 그 지점을 피해 우회로를 다시 계산합니다.</p>
+        <button class="tool-btn" id="btn-reset-fires">화재 전체 진화</button>
       </div>
 
       <div id="temp-controls" class="temp-controls" hidden>
@@ -36,7 +44,7 @@
         <p class="hint" id="temp-legend"></p>
         <p class="hint">통로 또는 지점(원)을 클릭하면 그 위치의 온도 센서 판독값으로 전송됩니다.
           지점이 과열되면 그 지점에 연결된 모든 통로가 막힙니다.</p>
-        <button class="tool-btn" id="btn-reset-sensors">🌡️ 온도 판독값 전체 삭제</button>
+        <button class="tool-btn" id="btn-reset-sensors">온도 판독값 전체 삭제</button>
       </div>
 
       <svg id="admin-map" class="minimap" role="img" aria-label="층 지도"></svg>
@@ -45,22 +53,27 @@
 
     <div>
       <section class="panel" style="margin-bottom:16px">
-        <h2>🌡️ 온도 센서</h2>
+        <h2>화재 발생 지점</h2>
+        <ul id="fire-list" class="list"><li class="empty">없음</li></ul>
+      </section>
+
+      <section class="panel" style="margin-bottom:16px">
+        <h2>온도 센서</h2>
         <ul id="sensor-list" class="list"><li class="empty">판독값 없음</li></ul>
       </section>
 
       <section class="panel" style="margin-bottom:16px">
-        <h2>🆘 구조 요청</h2>
+        <h2>구조 요청</h2>
         <ul id="sos-list" class="list"><li class="empty">아직 없음</li></ul>
       </section>
 
       <section class="panel" style="margin-bottom:16px">
-        <h2>👤 대피 중인 사용자</h2>
+        <h2>대피 중인 사용자</h2>
         <ul id="pos-list" class="list"><li class="empty">아직 없음</li></ul>
       </section>
 
       <section class="panel">
-        <h2>📈 KPI — 경로 재탐색 시간</h2>
+        <h2>KPI — 경로 재탐색 시간</h2>
         <ul id="metric-list" class="list"><li class="empty">아직 없음</li></ul>
       </section>
     </div>

@@ -1,0 +1,382 @@
+/**
+ * 사용자 앱(모바일) 전용 스타일.
+ *
+ * style.css는 관제·도면 편집기·보호자 화면이 함께 쓰므로 건드리지 않고,
+ * 여기서 .mobile-app 안쪽만 다시 정의한다.
+ *
+ * 기준: 화재 상황, 한 손, 장갑 낀 손, 흔들리는 몸.
+ *  · 조작 대상은 화면 절반 이상이거나 엄지가 닿는 아래쪽에 둔다
+ *  · 글자는 저시력자가 팔 뻗은 거리에서 읽을 크기
+ *  · 색만으로 상태를 전달하지 않는다 (아이콘·문구를 함께)
+ */
+
+.mobile-app {
+  /* dvh: 모바일 주소창이 접혀도 화면이 튀지 않는다 */
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #0b0b0e;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+           env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* ───────── 상태 표시줄 ───────── */
+.mobile-app .statusbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 12px;
+  flex-shrink: 0;
+}
+
+.mobile-app .chip {
+  font-size: 0.72rem;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #1c1c21;
+  color: #8b8b98;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mobile-app .chip.muted { background: transparent; }
+.mobile-app .chip.warn { background: #4a1d1f; color: #ffb4b6; }
+
+.mobile-app .test-entry {
+  background: #282044;
+  color: #d9c8ff;
+  border-color: #51417a;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.mobile-app .test-entry:active { background: #382c5d; }
+
+/* ───────── 공통 화면 ───────── */
+.mobile-app .screen {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 16px 12px;
+  max-width: 560px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.mobile-app .screen[hidden] { display: none; }
+
+.mobile-app h1 { font-size: 1.9rem; line-height: 1.25; }
+
+/* ───────── 1. 대기 화면 ───────── */
+.idle-head { padding: 12px 0 20px; }
+.idle-state { font-size: 0.95rem; color: #6ee7a8; margin-bottom: 10px; }
+.idle-place { font-size: 2rem; font-weight: 800; line-height: 1.2; }
+.idle-desc { margin-top: 10px; color: #a0a0ab; font-size: 1rem; line-height: 1.55; }
+
+/* 대피 시작 — 화면에서 가장 크고, 눈을 감고도 찾을 수 있는 자리 */
+.emergency-btn {
+  flex: 1;
+  min-height: 190px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  border-radius: 24px;
+  background: linear-gradient(160deg, #f0353a, #b91c1e);
+  color: #fff;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: 0 10px 30px rgba(229, 72, 77, 0.3);
+}
+
+/* 감시를 켜기 전에는 위급한 색이 아니어야 한다 — 평상시 화면이기 때문 */
+.emergency-btn:not(.armed) {
+  background: linear-gradient(160deg, #1f7a4d, #14603a);
+  box-shadow: 0 10px 30px rgba(48, 164, 108, 0.22);
+}
+
+.emergency-btn:disabled {
+  background: #2a2126;
+  color: #7c6a6d;
+  box-shadow: none;
+}
+
+.emergency-btn:active:not(:disabled) { transform: scale(0.985); }
+.eb-icon { font-size: 3.2rem; line-height: 1; }
+.eb-icon:empty { display: none; }
+.eb-label { font-size: 2.3rem; font-weight: 900; letter-spacing: -0.02em; }
+.eb-sub { font-size: 0.9rem; opacity: 0.85; }
+
+.idle-actions { display: grid; gap: 8px; margin-top: 14px; }
+
+.ghost-btn {
+  min-height: 56px;
+  padding: 0 16px;
+  border: 2px solid #33333d;
+  border-radius: 14px;
+  background: #16161a;
+  color: #f2f2f5;
+  font-family: inherit;
+  font-size: 1.05rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.ghost-btn:active { background: #1f1f26; }
+.ghost-btn.big { min-height: 64px; font-size: 1.15rem; }
+
+.mobile-app .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.mobile-app .row .ghost-btn { min-height: 50px; font-size: 0.95rem; }
+
+/* 설정(보호자) — 평상시에 하는 일이므로 접어 둔다 */
+.mobile-app .settings {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: #16161a;
+  border-radius: 14px;
+  flex-shrink: 0;
+  max-height: 45vh;
+  overflow: auto;
+}
+
+.mobile-app .settings summary {
+  cursor: pointer;
+  color: #a0a0ab;
+  font-size: 0.95rem;
+  padding: 4px 0;
+}
+
+.mobile-app .settings label {
+  display: block;
+  margin: 12px 0 6px;
+  font-size: 0.85rem;
+  color: #a0a0ab;
+}
+
+.mobile-app .settings input {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 14px;
+  border: 2px solid #33333d;
+  border-radius: 12px;
+  background: #1f1f26;
+  color: #f2f2f5;
+  font-size: 1.05rem;
+  font-family: inherit;
+  margin-bottom: 6px;
+}
+
+.mobile-app .guardian-ok { color: #6ee7a8; margin-top: 12px; }
+.mobile-app .guardian-code strong {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 1.5rem;
+  letter-spacing: 0.2em;
+  color: #6ee7a8;
+}
+
+/* 위치 선택 시트 */
+.idle-source { margin-top: 8px; font-size: 0.85rem; color: #6ee7a8; }
+
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.sheet[hidden] { display: none; }
+
+.sheet-inner {
+  width: 100%;
+  max-width: 460px;
+  max-height: 82vh;
+  overflow: auto;
+  background: #16161a;
+  border-radius: 22px 22px 0 0;
+  padding: 20px 16px calc(20px + env(safe-area-inset-bottom));
+}
+
+/* 닫기 버튼은 목록 위에 둔다 — 목록이 길면 아래 버튼을 못 찾는다 */
+.sheet-inner h2 { font-size: 1.3rem; margin-bottom: 8px; }
+.sheet-inner .hint { margin-bottom: 12px; }
+.sheet .picker { display: grid; gap: 8px; margin-top: 12px; }
+
+.sheet .pick-btn {
+  min-height: 64px;
+  border: 2px solid #33333d;
+  border-radius: 14px;
+  background: #1f1f26;
+  color: #f2f2f5;
+  font-size: 1.1rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  padding: 0 16px;
+}
+
+/* ───────── 2. 대피 안내 ───────── */
+/* 화면 전체가 조작면이다 */
+.tap-zone {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+  padding: 16px;
+  border: 2px solid #2f7d55;
+  border-radius: 20px;
+  background: #121814;
+  cursor: pointer;
+  user-select: none;
+  text-align: center;
+}
+
+.tap-zone:focus-visible { outline: 3px solid #30a46c; outline-offset: 3px; }
+
+.guide-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: #8b8b98;
+}
+
+/* 지금 해야 할 행동 — 화면에서 가장 큰 글자 */
+.mobile-app .command {
+  font-size: clamp(1.8rem, 7.5vw, 2.6rem);
+  font-weight: 900;
+  line-height: 1.28;
+  letter-spacing: -0.02em;
+}
+
+.scan-block { margin-top: 4px; }
+
+.mobile-app .scan-status {
+  margin-top: 8px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #a0a0ab;
+}
+
+.tap-hint { font-size: 0.76rem; color: #6f6f77; line-height: 1.5; }
+
+.mini-map {
+  flex-shrink: 0;
+  width: 100%;
+  height: 22vh;
+  min-height: 110px;
+  margin-top: 10px;
+  border-radius: 14px;
+  background: #131318;
+}
+
+/* 엄지가 닿는 자리 */
+.thumb-bar {
+  flex-shrink: 0;
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+}
+
+.sos-btn {
+  position: relative;
+  min-height: 76px;
+  border: 2px solid #ff6369;
+  border-radius: 18px;
+  background: #3a1416;
+  color: #fff;
+  font-size: 1.25rem;
+  font-weight: 800;
+  font-family: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.sos-btn span { position: relative; z-index: 1; }
+
+/* 누르고 있는 동안 차오른다 */
+.sos-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 0;
+  background: #b91c1e;
+  z-index: 0;
+}
+
+/* ───────── 3·4. 안전 대기 / 완료 ───────── */
+.hold-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 12px;
+}
+
+.hold-icon { font-size: 4.5rem; line-height: 1; }
+.hold-reason { font-size: 1.15rem; color: #d6d6de; line-height: 1.5; }
+
+.hold-where {
+  margin-top: 8px;
+  padding: 14px 18px;
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.hold-where span { display: block; font-size: 0.8rem; color: #a0a0ab; margin-bottom: 4px; }
+.hold-where strong { font-size: 1.5rem; }
+.hold-guardian { font-size: 0.95rem; color: #a0a0ab; }
+
+.danger-screen { background: #2a0f11; }
+.danger-screen .hold-icon { animation: sos-pulse 1.3s ease-in-out infinite; }
+.safe-screen { background: #0f2418; }
+
+@keyframes sos-pulse { 50% { opacity: 0.45; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .danger-screen .hold-icon { animation: none; }
+  .scan-needle { transition: none; }
+}
+
+/* ───────── 시연 패널 (실사용에선 접혀 있다) ───────── */
+.mobile-app .demo-panel {
+  flex-shrink: 0;
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #16161a;
+  border-radius: 12px;
+}
+
+.mobile-app .demo-panel summary { font-size: 0.8rem; color: #6f6f77; cursor: pointer; }
+.mobile-app .demo-panel .row { margin-top: 8px; grid-template-columns: repeat(3, 1fr); }
+
+/* ───────── 가로 모드: 지도를 접고 글자를 지킨다 ───────── */
+@media (orientation: landscape) and (max-height: 520px) {
+  .mini-map, .mobile-app .demo-panel { display: none; }
+  .idle-head { padding: 4px 0 10px; }
+  .emergency-btn { min-height: 120px; }
+  .eb-icon { font-size: 2rem; }
+  .eb-label { font-size: 1.7rem; }
+}
+
+/* ───────── 큰 화면에서는 폰 크기로 가둔다 ───────── */
+@media (min-width: 600px) {
+  .mobile-app .screen { max-width: 460px; }
+}

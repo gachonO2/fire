@@ -14,15 +14,16 @@ const $ = id => document.getElementById(id);
 
 const PHASE_VIEW = {
   idle:     { cls: 'idle',   title: '대기 중',       detail: '아직 대피가 시작되지 않았습니다.' },
-  guiding:  { cls: 'urgent', title: '🚨 대피 중',    detail: '안내에 따라 이동하고 있습니다.' },
-  safehold: { cls: 'danger', title: '🆘 구조 요청',  detail: '제자리에서 구조를 기다리고 있습니다.' },
-  arrived:  { cls: 'safe',   title: '✅ 대피 완료',  detail: '출구에 도착했습니다.' },
+  guiding:  { cls: 'urgent', title: '대피 중',    detail: '안내에 따라 이동하고 있습니다.' },
+  safehold: { cls: 'danger', title: '구조 요청',  detail: '제자리에서 구조를 기다리고 있습니다.' },
+  arrived:  { cls: 'safe',   title: '대피 완료',  detail: '출구에 도착했습니다.' },
 };
 
 let api = null;
 let code = null;
 let hazards = {};
 let sensors = [];
+let fires = [];
 let position = null;
 let lastPhase = null;
 
@@ -69,6 +70,7 @@ async function main() {
 
   api.on('hazards', h => { hazards = h; draw(); });
   api.on('sensors', s => { sensors = s; draw(); });
+  api.on('fires', f => { fires = f; draw(); });
   api.on('plan', () => draw());
 
   api.on('positions', list => {
@@ -100,7 +102,10 @@ function render() {
   $('alert-detail').textContent =
     phase === 'safehold' && position?.command ? position.command : view.detail;
 
+  // 저장된 장소 설명을 함께 보여준다 — 보호자가 "어디쯤인지" 감을 잡을 수 있도록
   $('g-location').textContent = position?.nodeName || '-';
+  const place = position?.nodeId ? api.floorPlan.getNode(position.nodeId) : null;
+  $('g-place-desc').textContent = [place?.description, place?.landmark].filter(Boolean).join(' ');
   $('g-exit').textContent = position?.exitName || '-';
   $('g-steps').textContent = position?.stepsLeft != null ? `${position.stepsLeft}걸음` : '-';
   $('g-conf').textContent = position?.confidence != null
@@ -130,7 +135,7 @@ function draw() {
   renderMap($('guardian-map'), {
     floorPlan,
     backgroundImage: api.backgroundImage,
-    hazards, sensors, route, userPos,
+    hazards, sensors, fires, route, userPos,
   });
 }
 

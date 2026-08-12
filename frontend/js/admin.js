@@ -19,7 +19,8 @@ const api = new Api();
 let hazards = {};
 let sensors = [];
 let positions = [];
-let currentTool = 'smoke';
+let currentTool = 'ignite';
+let fires = [];
 
 async function main() {
   document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
@@ -28,6 +29,7 @@ async function main() {
       document.querySelectorAll('.tool-btn[data-tool]').forEach(b =>
         b.setAttribute('aria-pressed', String(b === btn)));
       $('temp-controls').hidden = currentTool !== 'temp';
+      $('fire-controls').hidden = currentTool !== 'ignite';
     });
   });
 
@@ -38,7 +40,13 @@ async function main() {
   });
   slider.dispatchEvent(new Event('input'));
 
+  const fireSlider = $('fire-radius');
+  fireSlider.addEventListener('input', () => {
+    $('fire-radius-readout').textContent = `${fireSlider.value}m`;
+  });
+
   $('btn-reset').addEventListener('click', () => api.resetHazards().catch(showError));
+  $('btn-reset-fires').addEventListener('click', () => api.resetFires().catch(showError));
   $('btn-reset-sensors').addEventListener('click', () => api.resetSensors().catch(showError));
 
   api.on('status', ({ online, storage }) => {
@@ -54,6 +62,12 @@ async function main() {
 
   api.on('hazards', h => { hazards = h; draw(); });
 
+  api.on('fires', list => {
+    fires = list;
+    renderFires(list);
+    draw();
+  });
+
   api.on('sensors', list => {
     sensors = list;
     renderSensors(list);
@@ -64,9 +78,9 @@ async function main() {
     renderList($('sos-list'), list, s => {
       // 구조대가 보호자에게 바로 연락할 수 있도록 등록된 연락처를 함께 띄운다
       const guardian = s.guardianName
-        ? `<div class="guardian-line">👨‍👩‍👧 보호자 ${s.guardianName}${s.guardianContact ? ` · <a href="tel:${s.guardianContact}">${s.guardianContact}</a>` : ''}</div>`
+        ? `<div class="guardian-line">보호자 ${s.guardianName}${s.guardianContact ? ` · <a href="tel:${s.guardianContact}">${s.guardianContact}</a>` : ''}</div>`
         : '';
-      return `<span class="sos-item">🆘 ${s.nodeName ?? s.nodeId}</span> — ${s.reason}
+      return `<span class="sos-item">${s.nodeName ?? s.nodeId}</span> — ${s.reason}
         ${guardian}
         <div class="time">${s.userId} · 확신도 ${Math.round((s.confidence ?? 0) * 100)}% · ${time(s.ts)}</div>`;
     });
@@ -75,7 +89,7 @@ async function main() {
   api.on('positions', list => {
     positions = list;
     renderList($('pos-list'), list, p => {
-      const phase = { guiding: '대피 중', arrived: '대피 완료 ✅', safehold: '안전상태 🆘', idle: '대기' }[p.phase] || p.phase;
+      const phase = { guiding: '대피 중', arrived: '대피 완료', safehold: '구조 요청 중', idle: '대기' }[p.phase] || p.phase;
       return `<strong>${p.nodeName ?? p.nodeId}</strong> — ${phase}
         <div class="time">${p.userId} · 확신도 ${Math.round((p.confidence ?? 1) * 100)}% · ${time(p.ts)}</div>`;
     });
@@ -85,7 +99,7 @@ async function main() {
   api.on('metrics', list => {
     renderList($('metric-list'), list, m => {
       const kind = m.kind === 'reroute' ? '재탐색' : '최초 계산';
-      const ok = m.ms <= 2000 ? '✅' : '⚠️';
+      const ok = m.ms <= 2000 ? '정상' : '지연';
       return `${kind}: <strong>${m.ms} ms</strong> ${ok}
         <div class="time">${m.from ?? ''} 기준 · ${m.userId ?? ''} · ${time(m.ts)}</div>`;
     });
@@ -104,7 +118,9 @@ function draw() {
     backgroundImage: api.backgroundImage,
     hazards,
     sensors,
+    fires,
     positions,
+    onMapClick: (x, y) => { if (currentTool === 'ignite') ignite(x, y); },
     onEdgeClick: edge => applyTool({ edge }),
     onNodeClick: node => { if (currentTool === 'temp') applyTool({ node }); },
   });
@@ -122,11 +138,49 @@ function applyTool({ edge, node }) {
     return;
   }
 
-  if (!edge) return;
+  if (!edge || currentTool === 'ignite') return;
   const req = currentTool === 'clear'
     ? api.clearHazard(edge.id)
     : api.setHazard(edge.id, currentTool);
   req.catch(showError);
+}
+
+/** 도면의 임의 지점에 화재를 발생시킨다 */
+async function ignite(x, y) {
+  const radius = Number($('fire-radius').value);
+  try {
+    const res = await api.startFire({ x, y, radius });
+    const blocked = res.blockedEdges.length;
+    $('mode-badge').textContent = blocked
+      ? `화재 발생 — 통로 ${blocked}개 차단`
+      : '화재 발생 — 차단된 통로 없음 (반경을 넓혀보세요)';
+    $('mode-badge').classList.remove('offline');
+  } catch (err) {
+    showError(err);
+  }
+}
+
+function renderFires(list) {
+  const ul = $('fire-list');
+  if (!list?.length) {
+    ul.innerHTML = '<li class="empty">없음 — 지도를 클릭해 화재를 발생시키세요.</li>';
+    return;
+  }
+  ul.innerHTML = list.map(f => `<li>
+    <strong style="color:#ff6a00">화재 반경 ${f.radius}m</strong>
+    <div class="time">${f.id} · 좌표 ${Math.round(f.x)}, ${Math.round(f.y)} · ${time(f.startedAt)}</div>
+    <div class="actions-inline">
+      <button class="tool-btn" data-grow="${f.id}">＋ 확산</button>
+      <button class="tool-btn" data-put-out="${f.id}">진화</button>
+    </div>
+  </li>`).join('');
+
+  ul.querySelectorAll('[data-grow]').forEach(btn => btn.addEventListener('click', () => {
+    const fire = list.find(f => f.id === btn.dataset.grow);
+    api.updateFireRadius(fire.id, Math.min(60, fire.radius + 4)).catch(showError);
+  }));
+  ul.querySelectorAll('[data-put-out]').forEach(btn =>
+    btn.addEventListener('click', () => api.removeFire(btn.dataset.putOut).catch(showError)));
 }
 
 function renderSensors(list) {
@@ -139,9 +193,9 @@ function renderSensors(list) {
     .sort((a, b) => b.celsius - a.celsius)
     .map(s => {
       const where = s.edgeId ? `통로 ${s.edgeId}` : `지점 ${s.nodeId}`;
-      const state = s.stale ? '⚠️ 판독 끊김'
-        : s.celsius >= TEMP.BLOCK ? '🚫 통행 불가'
-        : s.celsius >= TEMP.WARN ? '⚠️ 우회 권고' : '정상';
+      const state = s.stale ? '판독 끊김'
+        : s.celsius >= TEMP.BLOCK ? '통행 불가'
+        : s.celsius >= TEMP.WARN ? '우회 권고' : '정상';
       return `<li>
         <strong style="color:${temperatureColor(s.celsius)}">${Math.round(s.celsius)}°C</strong>
         · ${where} — ${state}

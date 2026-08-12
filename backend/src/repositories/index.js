@@ -1,5 +1,6 @@
 import { useFirestore } from '../config.js';
 import { MemoryRepo } from './memory-repo.js';
+import { seedSamplePlans } from '../seed.js';
 
 let repo = null;
 
@@ -16,6 +17,7 @@ export async function getRepo() {
       const { FirestoreRepo } = await import('./firestore-repo.js');
       repo = new FirestoreRepo();
       await repo.init();
+      await seedSamplePlans(repo);
       console.log('[repo] Firestore 연결됨');
       return repo;
     } catch (err) {
@@ -25,6 +27,7 @@ export async function getRepo() {
 
   repo = new MemoryRepo();
   await repo.init();
+  await seedSamplePlans(repo);
   console.log('[repo] 인메모리 데모 모드');
   return repo;
 }

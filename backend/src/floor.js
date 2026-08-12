@@ -8,7 +8,7 @@
  * 센서가 정상이라는 이유로 관제가 막아둔 통로를 안내하게 된다.
  */
 import { FloorPlan } from '../../shared/floor-plan.js';
-import { hazardsFromSensors, mergeHazards } from '../../shared/hazard-rules.js';
+import { hazardsFromSensors, hazardsFromFires, mergeHazards } from '../../shared/hazard-rules.js';
 import { getRepo } from './repositories/index.js';
 
 export async function activeFloorPlan() {
@@ -16,11 +16,16 @@ export async function activeFloorPlan() {
   return new FloorPlan(await repo.getActivePlan());
 }
 
-/** @returns {Object} edgeId -> hazard (수동 + 온도 센서 통합) */
+/** @returns {Object} edgeId -> hazard (수동 + 온도 센서 + 화재 발생지 통합) */
 export async function currentHazards(floorPlan) {
   const repo = await getRepo();
   const plan = floorPlan || (await activeFloorPlan());
   const manual = await repo.getHazards();
   const sensors = await repo.getSensors();
-  return mergeHazards(manual, hazardsFromSensors(sensors, plan));
+  const fires = await repo.getFires();
+  return mergeHazards(
+    manual,
+    hazardsFromSensors(sensors, plan),
+    hazardsFromFires(fires, plan),
+  );
 }

@@ -34,19 +34,20 @@ export function temperatureColor(celsius) {
  * @param {SVGElement} svg
  * @param {Object} state {
  *   floorPlan,           FloorPlan 인스턴스 (필수)
- *   hazards, route, userPos, positions,
+ *   hazards, route, userPos, positions, recoveryTarget,
  *   sensors,             온도 판독값 오버레이
  *   backgroundImage,     도면 이미지 data URI
- *   onEdgeClick, onNodeClick,
+ *   onEdgeClick, onNodeClick, onMapClick, onUserMove,
  *   highlightEdgeId
  * }
  */
 export function renderMap(svg, state = {}) {
   const {
     floorPlan,
-    hazards = {}, route = null, userPos = null, positions = [],
-    sensors = [], backgroundImage = null,
-    onEdgeClick = null, onNodeClick = null, highlightEdgeId = null,
+    hazards = {}, route = null, userPos = null, positions = [], recoveryTarget = null,
+    sensors = [], fires = [], backgroundImage = null, backgroundOpacity = 0.55,
+    onEdgeClick = null, onNodeClick = null, onMapClick = null, onUserMove = null,
+    highlightEdgeId = null,
   } = state;
 
   svg.innerHTML = '';
@@ -80,7 +81,19 @@ export function renderMap(svg, state = {}) {
   if (backgroundImage) {
     el('image', {
       href: backgroundImage, x: minX, y: minY, width, height,
-      preserveAspectRatio: 'none', opacity: 0.55,
+      preserveAspectRatio: 'none', opacity: backgroundOpacity,
+    });
+  }
+
+  // 빈 바닥 클릭 — 화재를 임의 지점에 놓기 위한 것.
+  // 통로·지점보다 먼저 깔아야 그 위 요소들의 클릭을 가리지 않는다.
+  if (onMapClick) {
+    const bg = el('rect', {
+      x: minX, y: minY, width, height, fill: 'transparent', cursor: 'crosshair',
+    });
+    bg.addEventListener('click', evt => {
+      const p = toPlanCoords(evt, svg);
+      onMapClick(p.x, p.y);
     });
   }
 
@@ -148,6 +161,7 @@ export function renderMap(svg, state = {}) {
       fill: isExit ? '#30a46c' : isEv ? '#8f8f8f' : 'var(--node, #6f6f77)',
       stroke: 'var(--map-bg, #fff)', 'stroke-width': s * 0.18,
       cursor: onNodeClick ? 'pointer' : 'default',
+      'pointer-events': onNodeClick ? 'auto' : 'none',
     });
     if (onNodeClick) {
       circle.addEventListener('click', ev => { ev.stopPropagation(); onNodeClick(node); });
@@ -166,17 +180,117 @@ export function renderMap(svg, state = {}) {
     el('circle', { cx: n.x, cy: n.y, r: s * 0.6, fill: '#0091ff', opacity: 0.9 });
   }
 
+  // ---------------------------------------------------------------- 화재
+  // 통로·지점 위에 그려야 무엇이 불에 걸렸는지 한눈에 보인다
+  for (const fire of fires) {
+    const radius = (fire.radius ?? 6) / floorPlan.metersPerUnit;
+    el('circle', {
+      cx: fire.x, cy: fire.y, r: radius * 1.7,
+      fill: '#ff6a00', opacity: 0.14, 'pointer-events': 'none',
+    });
+    el('circle', {
+      cx: fire.x, cy: fire.y, r: radius,
+      fill: '#e5484d', opacity: 0.3,
+      stroke: '#ff3b30', 'stroke-width': s * 0.18, 'pointer-events': 'none',
+    });
+    el('circle', {
+      cx: fire.x, cy: fire.y, r: s * 0.75,
+      fill: '#ff3b30', stroke: '#fff', 'stroke-width': s * 0.15, 'pointer-events': 'none',
+    });
+    label(el, fire.x, fire.y - radius - s * 0.5, `화재 반경 ${fire.radius}m`,
+      { size: s * 0.95, fill: '#ff6a00', weight: 700 });
+  }
+
+  // 경로를 벗어난 테스트 인물이 돌아가야 할 가장 가까운 통로 지점
+  if (userPos && recoveryTarget) {
+    el('line', {
+      x1: userPos.x, y1: userPos.y, x2: recoveryTarget.x, y2: recoveryTarget.y,
+      stroke: '#4a9eff', 'stroke-width': s * 0.28,
+      'stroke-linecap': 'round', 'stroke-dasharray': `${s * 0.45} ${s * 0.35}`,
+      'pointer-events': 'none',
+    });
+    el('circle', {
+      cx: recoveryTarget.x, cy: recoveryTarget.y, r: s * 0.38,
+      fill: '#4a9eff', stroke: '#fff', 'stroke-width': s * 0.12,
+      'pointer-events': 'none',
+    });
+    label(el,
+      (userPos.x + recoveryTarget.x) / 2,
+      (userPos.y + recoveryTarget.y) / 2 - s * 0.5,
+      '경로 복귀',
+      { size: s * 0.72, fill: '#4a9eff', weight: 700 });
+  }
+
   // ---------------------------------------------------------------- 내 위치
   if (userPos && userPos.x != null) {
-    el('circle', {
+    const person = el('circle', {
       cx: userPos.x, cy: userPos.y, r: s * 0.7,
       fill: '#0091ff', stroke: '#fff', 'stroke-width': s * 0.2,
+      cursor: onUserMove ? 'grab' : 'default',
+    });
+    const halo = el('circle', {
+      cx: userPos.x, cy: userPos.y, r: s * 1.3,
+      fill: 'transparent', stroke: '#0091ff', 'stroke-width': s * 0.16, opacity: 0.6,
+      cursor: onUserMove ? 'grab' : 'default',
+    });
+    const personIcon = el('g', {
+      transform: `translate(${userPos.x} ${userPos.y})`,
+      cursor: onUserMove ? 'grab' : 'default',
+      'pointer-events': onUserMove ? 'auto' : 'none',
     });
     el('circle', {
-      cx: userPos.x, cy: userPos.y, r: s * 1.3,
-      fill: 'none', stroke: '#0091ff', 'stroke-width': s * 0.16, opacity: 0.6,
-    });
+      cx: 0, cy: -s * 0.62, r: s * 0.28,
+      fill: '#fff', stroke: '#082f49', 'stroke-width': s * 0.1,
+    }, personIcon);
+    el('path', {
+      d: `M 0 ${-s * 0.28} V ${s * 0.38} M ${-s * 0.45} 0 L 0 ${s * 0.08} L ${s * 0.45} 0 M 0 ${s * 0.38} L ${-s * 0.4} ${s * 0.86} M 0 ${s * 0.38} L ${s * 0.4} ${s * 0.86}`,
+      fill: 'none', stroke: '#fff', 'stroke-width': s * 0.2,
+      'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+    }, personIcon);
+
+    if (onUserMove) {
+      const beginDrag = evt => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        const handle = evt.currentTarget;
+        handle.setPointerCapture(evt.pointerId);
+        person.setAttribute('cursor', 'grabbing');
+        halo.setAttribute('cursor', 'grabbing');
+
+        const move = moveEvt => {
+          const p = toPlanCoords(moveEvt, svg);
+          for (const marker of [person, halo]) {
+            marker.setAttribute('cx', p.x);
+            marker.setAttribute('cy', p.y);
+          }
+          personIcon.setAttribute('transform', `translate(${p.x} ${p.y})`);
+        };
+        const end = endEvt => {
+          const p = toPlanCoords(endEvt, svg);
+          handle.removeEventListener('pointermove', move);
+          handle.removeEventListener('pointerup', end);
+          handle.removeEventListener('pointercancel', end);
+          onUserMove(p.x, p.y);
+        };
+
+        handle.addEventListener('pointermove', move);
+        handle.addEventListener('pointerup', end);
+        handle.addEventListener('pointercancel', end);
+      };
+      person.addEventListener('pointerdown', beginDrag);
+      halo.addEventListener('pointerdown', beginDrag);
+      personIcon.addEventListener('pointerdown', beginDrag);
+    }
   }
+}
+
+/** 화면 좌표 → 도면 좌표 */
+export function toPlanCoords(evt, svg) {
+  const pt = svg.createSVGPoint();
+  pt.x = evt.clientX;
+  pt.y = evt.clientY;
+  const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+  return { x: Math.round(p.x * 100) / 100, y: Math.round(p.y * 100) / 100 };
 }
 
 function label(el, x, y, text, { size, fill, weight = 400 }) {
@@ -192,7 +306,7 @@ function label(el, x, y, text, { size, fill, weight = 400 }) {
 
 function tempBadge(el, x, y, reading, s) {
   const color = temperatureColor(reading.celsius);
-  const text = `${Math.round(reading.celsius)}°C${reading.stale ? ' ⚠' : ''}`;
+  const text = `${Math.round(reading.celsius)}°C${reading.stale ? ' 판독 끊김' : ''}`;
   el('rect', {
     x: x - s * 1.4, y: y - s * 0.7, width: s * 2.8, height: s * 1.25, rx: s * 0.35,
     fill: color, opacity: reading.stale ? 0.4 : 0.92, 'pointer-events': 'none',

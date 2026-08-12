@@ -6,7 +6,7 @@ import { createApp } from '../src/app.js';
 
 let failed = 0;
 function expect(name, cond, detail = '') {
-  console.log(`${cond ? '✅' : '❌'} ${name} ${detail}`);
+  console.log(`[${cond ? '통과' : '실패'}] ${name} ${detail}`);
   if (!cond) failed++;
 }
 
@@ -319,6 +319,54 @@ const schoolReroute = await api('/api/route', {
 expect('주입 도면에서도 과열 회피', schoolReroute.body.route?.exit.id === 'C',
   `→ ${schoolReroute.body.route?.nodes.join(' → ')}`);
 
+// 38-1) 장소 설명이 저장·조회에서 그대로 유지되는지 (사용자 음성 안내의 원천)
+const described = {
+  ...schoolPlan,
+  id: 'school-2f-desc',
+  nodes: schoolPlan.nodes.map(n => n.id === 'A'
+    ? { ...n, description: '교실 뒷문 앞입니다.', landmark: '왼쪽 벽에 사물함이 있습니다.' }
+    : n),
+};
+await api('/api/plans', { method: 'POST', body: JSON.stringify(described) });
+const fetched = await api('/api/plans/school-2f-desc');
+const placeA = fetched.body.nodes.find(n => n.id === 'A');
+expect('장소 설명이 저장 후에도 유지됨',
+  placeA.description === '교실 뒷문 앞입니다.' && placeA.landmark === '왼쪽 벽에 사물함이 있습니다.');
+
+// 38-2) 너무 긴 설명은 거부 (음성으로 읽히므로)
+const tooLong = await api('/api/plans', {
+  method: 'POST',
+  body: JSON.stringify({ ...described, id: 'too-long',
+    nodes: described.nodes.map(n => n.id === 'A' ? { ...n, description: '가'.repeat(201) } : n) }),
+});
+expect('200자 넘는 장소 설명은 400', tooLong.status === 400,
+  tooLong.body.details?.[0]);
+
+// 38-3) 3D 도면 샘플이 서버 기동 시 자동 등록되고 장소 설명까지 들어 있는지
+const gachon = await api('/api/plans/gachon-3f');
+expect('가천관 3층 샘플 도면 자동 등록', gachon.status === 200 && gachon.body.nodes.length === 5,
+  `장소 ${gachon.body.nodes?.length}곳`);
+expect('샘플 도면 5곳 모두 설명 저장됨',
+  gachon.body.nodes.every(n => n.description?.trim() && n.landmark?.trim()));
+const gachonImg = await api('/api/plans/gachon-3f/image');
+expect('샘플 3D 도면 이미지 등록됨',
+  gachonImg.body.dataUri?.startsWith('data:image/svg+xml;base64,'),
+  `${Math.round((gachonImg.body.dataUri?.length ?? 0) / 1024)}KB`);
+
+// 38-4) 테스트 공간용 도면 5개와 각 도면의 테스트 위치 5곳
+const testPlanList = (await api('/api/plans')).body.filter(p => p.id.startsWith('test-'));
+expect('테스트 전용 도면 5개 자동 등록', testPlanList.length === 5,
+  testPlanList.map(p => p.name).join(', '));
+for (const summary of testPlanList) {
+  const detail = await api(`/api/plans/${summary.id}`);
+  const places = detail.body.nodes.filter(n => n.type !== 'exit' && n.type !== 'elevator');
+  expect(`${summary.name}: 테스트 위치 5곳 저장`,
+    places.length === 5 && places.every(n => n.description?.trim() && n.landmark?.trim()));
+  const blueprint = await api(`/api/plans/${summary.id}/image`);
+  expect(`${summary.name}: 현실형 설계도 배경 저장`,
+    blueprint.body.dataUri?.startsWith('data:image/svg+xml;base64,'));
+}
+
 // 39) 사용 중인 도면은 삭제 불가
 const delActive = await api('/api/plans/school-2f', { method: 'DELETE' });
 expect('사용 중인 도면 삭제는 409', delActive.status === 409);
@@ -337,8 +385,60 @@ expect('도면 이미지 조회', (await api('/api/plans/school-2f/image')).body
 const badImg = await api('/api/plans/school-2f/image', { method: 'PUT', body: JSON.stringify({ dataUri: 'not-an-image' }) });
 expect('이미지가 아닌 데이터는 400', badImg.status === 400);
 
+// ------------------------------------------------- 임의 지점 화재 → 회피 경로
+// 가천관 3층으로 옮겨 실제 시나리오를 재현한다
+await api('/api/plans/gachon-3f/activate', { method: 'PUT' });
+
+const calm = await api('/api/route', { method: 'POST', body: JSON.stringify({ from: 'G1' }) });
+expect('평상시에는 서편 계단이 최단', calm.body.route?.exit.id === 'G5');
+
+// 41-1) 통로가 아니라 도면 좌표를 찍어서 불을 낸다
+const fire = await api('/api/fires', {
+  method: 'POST', body: JSON.stringify({ x: 450, y: 280, radius: 3 }),
+});
+expect('임의 좌표에 화재 발생', fire.status === 201 && fire.body.fire.id,
+  `차단 통로 ${fire.body.blockedEdges.join(', ')}`);
+expect('그 자리 통로만 차단됨', fire.body.blockedEdges.join() === 'GL4');
+
+const escaped = await api('/api/route', {
+  method: 'POST', body: JSON.stringify({ from: 'G1', kind: 'reroute' }),
+});
+expect('화재 지점을 피해 동편으로 회피', escaped.body.route?.exit.id === 'G4',
+  `→ ${escaped.body.route?.nodes.join(' → ')} (${escaped.body.ms}ms)`);
+expect('화재 회피 재탐색도 2초 이내', escaped.body.ms < 2000, `${escaped.body.ms} ms`);
+
+// 41-2) 불이 번지면(반경 확대) 결국 갈 곳이 없다 → 안전상태
+await api(`/api/fires/${fire.body.fire.id}`, { method: 'PUT', body: JSON.stringify({ radius: 20 }) });
+const trapped = await api('/api/route', {
+  method: 'POST', body: JSON.stringify({ from: 'G1', kind: 'reroute' }),
+});
+expect('불이 번져 교차점을 삼키면 경로 없음',
+  trapped.body.route === null && Boolean(trapped.body.reason));
+
+// 41-3) 진화하면 원래 경로로 복귀
+await api(`/api/fires/${fire.body.fire.id}`, { method: 'DELETE' });
+const recovered = await api('/api/route', { method: 'POST', body: JSON.stringify({ from: 'G1' }) });
+expect('진화 후 원래 경로 복귀', recovered.body.route?.exit.id === 'G5');
+
+// 41-4) 잘못된 입력 방어
+const noCoord = await api('/api/fires', { method: 'POST', body: JSON.stringify({ radius: 5 }) });
+expect('좌표 없는 화재는 400', noCoord.status === 400);
+const hugeRadius = await api('/api/fires', {
+  method: 'POST', body: JSON.stringify({ x: 100, y: 100, radius: 999 }),
+});
+expect('비현실적인 반경은 400', hugeRadius.status === 400);
+
+await api('/api/fires/reset', { method: 'POST' });
+expect('화재 전체 진화', (await api('/api/fires')).body.length === 0);
+
+// 도면을 바꿀 때 이전 도면 좌표의 화재가 새 도면에 남으면 안 된다.
+await api('/api/fires', {
+  method: 'POST', body: JSON.stringify({ x: 450, y: 280, radius: 3 }),
+});
+
 // 42) 원래 도면으로 복귀 + 시나리오 초기화
 await api('/api/plans/hospital-3f/activate', { method: 'PUT' });
+expect('도면 전환 시 이전 테스트 화재 제거', (await api('/api/fires')).body.length === 0);
 const hz3 = await api('/api/hazards');
 expect('도면 복귀 후 시나리오 초기화 → E6만 남음', Object.keys(hz3.body).join() === 'E6');
 
