@@ -200,6 +200,75 @@
     </div>
   </main>
 
+  <!-- ══════════════════ 5. 관제 ══════════════════ -->
+  <main id="screen-admin" class="screen" hidden>
+    <h2 class="panel-title">관제 — 화재 상황 관리</h2>
+
+    <svg id="admin-map" class="panel-map" role="img" aria-label="층 지도"></svg>
+    <p class="map-tip">지도를 눌러 그 자리에 불을 냅니다</p>
+
+    <label class="slider-row" for="admin-radius">
+      불의 크기 <strong id="admin-radius-out">6m</strong>
+    </label>
+    <input id="admin-radius" type="range" min="2" max="20" step="1" value="6" />
+
+    <div class="row">
+      <button id="btn-admin-putout" class="ghost-btn">불 끄기</button>
+      <button id="btn-admin-reset" class="ghost-btn">↺ 초기화</button>
+    </div>
+
+    <section class="panel-block">
+      <h3>대피 중인 사람 <span id="admin-count" class="chip">0</span></h3>
+      <ul id="admin-people" class="mini-list"><li class="empty">없음</li></ul>
+    </section>
+
+    <section class="panel-block">
+      <h3>구조 요청</h3>
+      <ul id="admin-sos" class="mini-list"><li class="empty">없음</li></ul>
+    </section>
+  </main>
+
+  <!-- ══════════════════ 6. 보호자 ══════════════════ -->
+  <main id="screen-guardian" class="screen" hidden>
+    <h2 class="panel-title">보호자 — 대상자 지켜보기</h2>
+
+    <div id="gp-banner" class="gp-banner idle" aria-live="polite">
+      <strong id="gp-title">대기 중</strong>
+      <span id="gp-detail">아직 대피가 시작되지 않았습니다.</span>
+    </div>
+
+    <div class="gp-facts">
+      <div><span>현재 위치</span><strong id="gp-place">—</strong></div>
+      <div><span>목표 출구</span><strong id="gp-exit">—</strong></div>
+      <div><span>남은 걸음</span><strong id="gp-steps">—</strong></div>
+      <div><span>갱신</span><strong id="gp-updated">—</strong></div>
+    </div>
+
+    <section class="panel-block">
+      <h3>지금 받고 있는 안내</h3>
+      <p id="gp-command" class="gp-command">—</p>
+    </section>
+
+    <svg id="gp-map" class="panel-map" role="img" aria-label="대상자 위치 지도"></svg>
+
+    <section class="panel-block">
+      <h3>지켜볼 대상</h3>
+      <p class="hint" id="gp-target">내 계정을 지켜보는 중입니다 (보호자에게 보이는 화면 그대로).</p>
+      <div class="row">
+        <input id="gp-code" type="text" maxlength="6" placeholder="보호자 코드" aria-label="보호자 코드" />
+        <button id="btn-gp-apply" class="ghost-btn">코드로 보기</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- 역할 전환 — 대피가 시작되면 사라진다 -->
+  <nav id="role-nav" class="role-nav" role="tablist" aria-label="역할 선택">
+    <button class="role-tab" data-role="idle" role="tab" aria-selected="true">대피</button>
+    <button class="role-tab" data-role="admin" role="tab" aria-selected="false">관제</button>
+    <button class="role-tab" data-role="guardian" role="tab" aria-selected="false">보호자</button>
+    <a class="role-tab" href="architect.html">도면</a>
+  </nav>
+
   <script type="module" src="js/app.js"></script>
   <script>
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');

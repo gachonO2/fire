@@ -17,6 +17,7 @@ import { Api } from './api.js';
 import { EvacuationSession } from './evacuation.js';
 import { DirectionScanner } from './direction-scan.js';
 import { renderMap } from './minimap.js';
+import { createPanels } from './panels.js';
 import {
   automaticEvacuationAction, alarmHazardKeys, hasNewFire, hasNewSetValue,
 } from './auto-evacuation.js';
@@ -38,6 +39,7 @@ let fires = [];
 let sensors = [];
 let autoWalkTimer = null;
 let wakeLock = null;
+let panels = null;
 let placeVerified = false;
 let verifiedPlanId = null;
 let pendingFire = false;
@@ -69,6 +71,9 @@ async function main() {
   session = new EvacuationSession({ api, guidance, odometry, userId: persistentUserId() });
   session.onAnnounce = text => { $('command').textContent = text; };
   session.onChange = render;
+
+  panels = createPanels(api, () => session.userId);
+  wireRoleNav();
 
   buildStartPicker();
   wireIdleScreen();
@@ -891,11 +896,31 @@ function stopAutoWalk() {
 }
 
 // ══════════════════════════════════════════════════════════ 표시
-const SCREENS = ['idle', 'guide', 'hold', 'done'];
+const SCREENS = ['idle', 'guide', 'hold', 'done', 'admin', 'guardian'];
+
+/** 대피가 진행 중일 때는 역할 탭을 감춘다 — 안내 화면을 벗어날 이유가 없다 */
+const EVACUATING = new Set(['guide', 'hold', 'done']);
 
 function showScreen(name) {
   for (const s of SCREENS) $(`screen-${s}`).hidden = s !== name;
   document.body.dataset.screen = name;
+
+  $('role-nav').hidden = EVACUATING.has(name);
+  document.querySelectorAll('.role-tab[data-role]').forEach(btn =>
+    btn.setAttribute('aria-selected', String(btn.dataset.role === name)));
+
+  if (name === 'admin' || name === 'guardian') panels?.show(name);
+  else panels?.show(null);
+}
+
+function wireRoleNav() {
+  document.querySelectorAll('.role-tab[data-role]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      // 대피 중에는 역할을 바꿀 수 없다 (탭도 숨겨져 있다)
+      if (EVACUATING.has(document.body.dataset.screen)) return;
+      showScreen(btn.dataset.role);
+    });
+  });
 }
 
 function render() {

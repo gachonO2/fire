@@ -561,3 +561,132 @@
 @media (min-width: 600px) {
   .mobile-app .screen { max-width: 460px; }
 }
+
+/* ───────── 역할 전환 탭 ───────── */
+.role-nav {
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+  background: #101014;
+  border-top: 1px solid #24242c;
+}
+
+.role-nav[hidden] { display: none; }
+
+.role-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 8px 4px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: #8b8b98;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.role-tab[aria-selected="true"] { background: #16261d; color: #6ee7a8; }
+.role-tab:active { background: #1f1f26; }
+
+/* ───────── 관제·보호자 패널 (앱 안) ───────── */
+.mobile-app .panel-title {
+  font-size: 1.1rem;
+  margin: 6px 0 10px;
+  flex-shrink: 0;
+}
+
+#screen-admin, #screen-guardian { overflow-y: auto; }
+
+.panel-map {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  flex-shrink: 0;
+  border-radius: 14px;
+  background: #131318;
+  cursor: crosshair;
+}
+
+.slider-row {
+  display: block;
+  margin: 12px 0 6px;
+  font-size: 0.9rem;
+  color: #a0a0ab;
+}
+
+.slider-row strong { font-size: 1.2rem; color: #f0353a; }
+#screen-admin input[type="range"] { width: 100%; accent-color: #f0353a; margin-bottom: 10px; }
+
+.panel-block {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: #16161a;
+  border-radius: 14px;
+}
+
+.panel-block h3 {
+  font-size: 0.95rem;
+  color: #a0a0ab;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mini-list { list-style: none; font-size: 0.92rem; }
+.mini-list li { padding: 8px 0; border-bottom: 1px solid #24242c; }
+.mini-list li:last-child { border-bottom: none; }
+.mini-list .time { font-size: 0.75rem; color: #6f6f77; margin-top: 2px; }
+.mini-list .empty { color: #6f6f77; }
+.mini-list a { color: #6ee7a8; }
+.danger-text { color: #ff6369; }
+
+/* 보호자 패널 */
+.gp-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px;
+  border-radius: 16px;
+  border: 2px solid #33333d;
+  background: #16161a;
+  flex-shrink: 0;
+}
+
+.gp-banner strong { font-size: 1.3rem; }
+.gp-banner span { font-size: 0.9rem; color: #a0a0ab; }
+.gp-banner.urgent { border-color: #f0353a; background: #2a1618; }
+.gp-banner.danger { border-color: #ff6369; background: #2a1618; }
+.gp-banner.safe { border-color: #30a46c; background: #14301f; }
+
+.gp-facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 12px 0;
+  flex-shrink: 0;
+}
+
+.gp-facts div { padding: 10px 12px; background: #16161a; border-radius: 12px; }
+.gp-facts span { display: block; font-size: 0.72rem; color: #6f6f77; }
+.gp-facts strong { font-size: 1.05rem; }
+
+.gp-command { font-size: 1.05rem; font-weight: 700; line-height: 1.45; }
+
+#screen-guardian input[type="text"] {
+  min-height: 50px;
+  padding: 0 12px;
+  border: 2px solid #33333d;
+  border-radius: 12px;
+  background: #1f1f26;
+  color: #f2f2f5;
+  font-family: inherit;
+  font-size: 1.05rem;
+  text-transform: uppercase;
+}

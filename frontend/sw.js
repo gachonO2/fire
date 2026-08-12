@@ -22,6 +22,7 @@ const SHELL = [
   './css/mobile.css',
   './js/api.js',
   './js/app.js',
+  './js/panels.js',
   './js/evacuation.js',
   './js/auto-evacuation.js',
   './js/sos-trigger.js',
