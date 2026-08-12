@@ -10,6 +10,7 @@
 
 import { positionOnRoute } from './minimap.js';
 import { closestPointOnSegment } from '../shared/geometry.js';
+import { routeToNearestExit } from '../shared/pathfinding.js';
 
 const CONFIDENCE_FLOOR = 0.4;   // 이하로 떨어지면 안전상태 전환
 const TURN_THRESHOLD = 30;      // 도 — 이 이상 꺾이면 회전 안내
@@ -40,6 +41,9 @@ export class EvacuationSession {
     this.lastCommand = '';
     this.lastMs = null;
     this._segmentTimer = null;
+    this.trainingMode = false;
+    this.trainingHazards = {};
+    this._hazardsBeforeTraining = null;
 
     /** 화면 갱신 콜백 */
     this.onChange = () => {};
@@ -60,6 +64,26 @@ export class EvacuationSession {
   get plan() { return this.api.floorPlan; }
   get currentEdge() { return this.route?.edges[this.edgeIndex] || null; }
   get exitName() { return this.route?.exit?.name || null; }
+
+  /** 서버와 보호자에게 영향을 주지 않는 로컬 훈련을 시작한다. */
+  beginTraining(hazards = {}) {
+    if (this.phase !== 'idle') return false;
+    this.trainingMode = true;
+    this.trainingHazards = { ...hazards };
+    this._hazardsBeforeTraining = { ...this.hazards };
+    this.hazards = { ...this.hazards, ...this.trainingHazards };
+    this.onChange(this);
+    return true;
+  }
+
+  endTraining() {
+    if (!this.trainingMode) return;
+    this.hazards = { ...(this._hazardsBeforeTraining || {}) };
+    this.trainingMode = false;
+    this.trainingHazards = {};
+    this._hazardsBeforeTraining = null;
+    this.onChange(this);
+  }
 
   get stepsLeft() {
     const edge = this.currentEdge;
@@ -158,8 +182,23 @@ export class EvacuationSession {
 
   /** 백엔드에 경로 요청(실패 시 오프라인 로컬 계산). 없으면 안전상태 전환 후 null */
   async _requestRoute(fromNodeId, kind) {
-    const { route, ms, offline, reason } =
-      await this.api.computeRoute(fromNodeId, kind, this.userId);
+    let result;
+    if (this.trainingMode) {
+      const t0 = performance.now();
+      const local = routeToNearestExit(this.plan, fromNodeId, this.hazards);
+      result = {
+        route: local && {
+          ...local,
+          edges: local.edges.map(edge => edge.id),
+        },
+        ms: Math.round((performance.now() - t0) * 100) / 100,
+        offline: false,
+        reason: local ? null : '가상 화재로 접근 가능한 대피 경로가 없습니다.',
+      };
+    } else {
+      result = await this.api.computeRoute(fromNodeId, kind, this.userId);
+    }
+    const { route, ms, offline, reason } = result;
 
     this.lastMs = ms;
     this.offline = offline;
@@ -385,8 +424,12 @@ export class EvacuationSession {
   // -------------------------------------------------------------- 재탐색
   /** 위험 상태가 바뀌었을 때 호출. 경로가 달라지면 다시 안내한다. */
   async hazardsChanged(hazards) {
-    const changed = signature(this.hazards) !== signature(hazards);
-    this.hazards = hazards;
+    const nextHazards = this.trainingMode
+      ? { ...hazards, ...this.trainingHazards }
+      : hazards;
+    if (this.trainingMode) this._hazardsBeforeTraining = { ...hazards };
+    const changed = signature(this.hazards) !== signature(nextHazards);
+    this.hazards = nextHazards;
     if (this.phase !== 'guiding' || !changed) { this.onChange(this); return; }
 
     const old = this.route;
@@ -444,6 +487,13 @@ export class EvacuationSession {
   enterSafeHold(reason) {
     this._clearScheduledSegment();
     this.phase = 'safehold';
+    if (this.trainingMode) {
+      this.guidance.cmdDanger(`훈련 상황. ${reason}`);
+      setTimeout(() => this.guidance.speak(
+        '실제 상황이라면 구조 요청을 전송하고 그 자리에서 대기합니다. 훈련이므로 신고는 전송하지 않습니다.'), 1800);
+      this.onChange(this);
+      return;
+    }
     this.guidance.cmdDanger(reason);
     setTimeout(() => this.guidance.cmdSOS(), 1800);
 
@@ -472,6 +522,7 @@ export class EvacuationSession {
 
   reset() {
     this._clearScheduledSegment();
+    if (this.trainingMode) this.hazards = { ...(this._hazardsBeforeTraining || {}) };
     this.phase = 'idle';
     this.startNodeId = null;
     this.route = null;
@@ -480,6 +531,9 @@ export class EvacuationSession {
     this.positionOverride = null;
     this.recovery = null;
     this.directionMismatch = false;
+    this.trainingMode = false;
+    this.trainingHazards = {};
+    this._hazardsBeforeTraining = null;
     this.deviationStreak = 0;
     this.lastCommand = '';
     this.onChange(this);
@@ -487,6 +541,7 @@ export class EvacuationSession {
 
   // ------------------------------------------------------------ 위치 보고
   _report() {
+    if (this.trainingMode) return;
     const node = this.plan.getNode(this.currentNodeId);
     const pos = this.position() || { x: node?.x, y: node?.y };
 

@@ -15,45 +15,64 @@
 </head>
 <body class="mobile-app">
 
-  <!-- 얇은 상태 표시줄: 평상시엔 눈에 안 띄고, 문제가 있을 때만 보인다 -->
-  <header class="statusbar">
-    <span id="net-badge" class="chip">연결 중</span>
-    <span id="plan-badge" class="chip muted">—</span>
-    <span id="power-badge" class="chip muted" hidden></span>
+  <header class="statusbar" aria-label="앱과 연결 상태">
+    <strong class="app-name">대피 길잡이</strong>
+    <div class="system-status">
+      <span id="net-badge" class="chip">연결 중</span>
+      <span id="plan-badge" class="chip muted">—</span>
+      <span id="training-chip" class="chip training" hidden>훈련 중</span>
+      <span id="power-badge" class="chip muted" hidden></span>
+    </div>
   </header>
 
   <!-- ══════════════════ 1. 대기 화면 ══════════════════ -->
   <main id="screen-idle" class="screen">
-    <div class="idle-head">
-      <p id="idle-state" class="idle-state">감시 꺼짐</p>
-      <h1 id="idle-place" class="idle-place">위치 확인 중…</h1>
+    <section class="location-card" aria-labelledby="idle-place">
+      <div class="idle-status-line">
+        <span class="status-mark" aria-hidden="true"></span>
+        <p id="idle-state" class="idle-state" aria-live="polite">화재 알림 꺼짐</p>
+      </div>
+      <p class="section-label">현재 위치</p>
+      <h1 id="idle-place" class="idle-place">확인되지 않음</h1>
       <p id="idle-desc" class="idle-desc">
-        벽이나 문틀의 안내 태그에 휴대폰을 대면 위치가 자동으로 확인됩니다.
+        정확한 대피 경로를 위해 먼저 현재 위치를 확인하세요.
       </p>
       <p id="idle-source" class="idle-source" aria-live="polite"></p>
-    </div>
+      <button id="btn-locate" class="locate-btn">
+        <span id="locate-label" class="action-label">내 위치 확인</span>
+        <span id="locate-sub" class="action-sub">안내 태그 또는 QR 사용</span>
+      </button>
+      <video id="qr-video" hidden playsinline muted aria-label="QR 위치 표지 촬영 화면"></video>
+    </section>
 
-    <!-- 위치가 확인되기 전에는 경보만 제공하고 경로 안내나 자동 SOS로 전환하지 않는다. -->
-    <button id="btn-start" class="emergency-btn">
+    <section class="watch-card" aria-labelledby="watch-title">
+      <div>
+        <h2 id="watch-title">화재 자동 알림</h2>
+        <p id="watch-desc">꺼져 있습니다. 켜 두면 새 화재를 진동과 음성으로 알려드립니다.</p>
+      </div>
+      <button id="btn-watch" class="watch-toggle" type="button" aria-pressed="false">켜기</button>
+    </section>
+
+    <button id="btn-start" class="emergency-btn" disabled>
       <span id="eb-icon" class="eb-icon" aria-hidden="true"></span>
-      <span id="eb-label" class="eb-label">화재 감시 시작</span>
-      <span class="eb-sub" id="eb-sub">눌러 두면 불이 났을 때 자동으로 안내합니다</span>
+      <span id="eb-label" class="eb-label">대피 안내 시작</span>
+      <span class="eb-sub" id="eb-sub">현재 위치를 확인하면 사용할 수 있습니다</span>
     </button>
+    <p class="emergency-note">실제 화재이거나 즉시 대피해야 할 때만 누르세요.</p>
 
-    <div class="idle-actions">
-      <button id="btn-locate" class="ghost-btn">지금 위치 확인 (태그·QR)</button>
-      <a class="ghost-btn test-entry" href="demo.html?test=1">화재 대피 테스트</a>
-    </div>
-    <video id="qr-video" hidden playsinline muted aria-hidden="true"></video>
-
-    <details class="settings">
-      <summary>동행자·훈련용 — 위치를 직접 지정</summary>
-      <p class="hint">평상시 훈련이나 동행자가 도와줄 때만 씁니다. 실제 화재에서는 태그·QR로 자동 확인됩니다.</p>
+    <details class="settings utility-settings">
+      <summary>훈련 및 기타 설정</summary>
+      <p class="hint">아래 기능은 동행자가 있거나 대피 훈련을 할 때 사용하세요.</p>
+      <button id="btn-training-start" class="training-start-btn" type="button">
+        <strong>가상 화재 훈련 시작</strong>
+        <span>실제 신고 없이 화재 경보와 대피 안내를 체험합니다</span>
+      </button>
       <button id="btn-pick" class="ghost-btn">목록에서 위치 선택</button>
+      <a class="ghost-btn test-entry" href="demo.html?test=1">화재 대피 테스트 열기</a>
     </details>
 
     <details class="settings">
-      <summary>보호자에게 내 위치 공유 설정</summary>
+      <summary>보호자 연결</summary>
       <p class="hint">미리 등록해 두면 대피가 시작될 때 보호자 화면에 내 위치·경로가 실시간으로 표시됩니다.</p>
       <label for="guardian-name">보호자 이름</label>
       <input id="guardian-name" type="text" autocomplete="name" placeholder="예: 김보호" />
@@ -73,11 +92,29 @@
     </details>
   </main>
 
+  <!-- 위치 확인 방법 선택 -->
+  <div id="locate-sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="locate-sheet-title" hidden>
+    <div class="sheet-inner method-sheet">
+      <h2 id="locate-sheet-title">현재 위치 확인</h2>
+      <p class="hint">주변에 설치된 안내 표지에 맞는 방법을 선택하세요.</p>
+      <button id="btn-nfc" class="method-btn" type="button">
+        <strong>안내 태그 사용</strong>
+        <span>휴대폰 뒷면을 벽이나 문틀의 태그에 댑니다</span>
+      </button>
+      <button id="btn-qr" class="method-btn" type="button">
+        <strong>QR 표지 촬영</strong>
+        <span>카메라를 벽의 QR 표지에 향하게 합니다</span>
+      </button>
+      <p id="locate-method-status" class="method-status" aria-live="polite"></p>
+      <button id="btn-locate-close" class="ghost-btn" type="button">취소</button>
+    </div>
+  </div>
+
   <!-- 위치 선택 시트 -->
   <div id="place-sheet" class="sheet" role="dialog" aria-modal="true" aria-label="위치 선택" hidden>
     <div class="sheet-inner">
-      <h2>위치 직접 지정</h2>
-      <p class="hint">동행자·훈련용입니다. 실제로는 벽의 안내 태그로 자동 확인됩니다.</p>
+      <h2 id="place-sheet-title">위치 직접 지정</h2>
+      <p id="place-sheet-hint" class="hint">동행자·훈련용입니다. 실제로는 벽의 안내 태그로 자동 확인됩니다.</p>
       <button id="btn-sheet-close" class="ghost-btn">닫기</button>
       <div id="start-picker" class="picker" role="group" aria-label="위치 목록"></div>
     </div>
@@ -105,21 +142,21 @@
           </div>
           <div class="scan-labels"><span>왼쪽</span><span>정면</span><span>오른쪽</span></div>
         </div>
-        <p id="scan-status" class="scan-status" aria-hidden="true">진동이나 소리가 이어지는 방향으로 이동하세요</p>
+        <p id="scan-status" class="sr-only">방향 신호를 확인하고 있습니다.</p>
       </div>
 
-      <p class="tap-hint">화면을 두드리면 다시 · 두 번이면 현재 위치 · 위로 쓸면 방향 찾기</p>
+    </div>
+
+    <div class="guide-quick-actions" role="group" aria-label="음성 안내 조작">
+      <button id="btn-guide-repeat" type="button">안내 다시 듣기</button>
+      <button id="btn-guide-where" type="button">현재 위치 듣기</button>
     </div>
 
     <svg id="minimap" class="mini-map" aria-hidden="true"></svg>
 
-    <!-- 엄지가 닿는 자리에 고정 -->
-    <div class="thumb-bar">
-      <button id="btn-sos" class="sos-btn">
-        <span id="sos-label">길게 눌러 구조요청</span>
-        <span id="sos-fill" class="sos-fill"></span>
-      </button>
-    </div>
+    <p id="sos-status" class="sr-only" aria-live="assertive" aria-atomic="true">
+      구조가 필요하면 볼륨 올리기 버튼을 빠르게 세 번 누르세요.
+    </p>
 
     <details class="demo-panel">
       <summary>시연용 조작 (센서 없는 환경)</summary>
@@ -127,6 +164,7 @@
         <button id="btn-step" class="ghost-btn">한 걸음</button>
         <button id="btn-auto" class="ghost-btn" aria-pressed="false">자동 이동</button>
         <button id="btn-deviate" class="ghost-btn">경로 이탈 재현</button>
+        <button id="btn-volume-up-demo" class="ghost-btn">볼륨 올리기 입력</button>
       </div>
     </details>
   </main>
@@ -134,11 +172,11 @@
   <!-- ══════════════════ 3. 안전 대기 (구조요청) ══════════════════ -->
   <main id="screen-hold" class="screen danger-screen" hidden>
     <div class="hold-body" aria-live="assertive">
-      <p class="hold-icon" aria-hidden="true">SOS</p>
-      <h1>그 자리에서 기다리세요</h1>
+      <p id="hold-icon" class="hold-icon" aria-hidden="true">SOS</p>
+      <h1 id="hold-title">그 자리에서 기다리세요</h1>
       <p id="hold-reason" class="hold-reason"></p>
       <div class="hold-where">
-        <span>구조대에 전달된 내 위치</span>
+        <span id="hold-where-label">구조대에 전달된 내 위치</span>
         <strong id="hold-place">—</strong>
       </div>
       <p id="hold-guardian" class="hold-guardian"></p>

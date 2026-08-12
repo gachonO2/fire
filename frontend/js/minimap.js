@@ -132,7 +132,7 @@ export function renderMap(svg, state = {}) {
     if (onEdgeClick) {
       const hit = el('line', {
         x1: a.x, y1: a.y, x2: b.x, y2: b.y,
-        stroke: 'transparent', 'stroke-width': s * 2, cursor: 'pointer',
+        class: 'map-edge-hit', stroke: 'transparent', 'stroke-width': s * 2, cursor: 'pointer',
       });
       hit.addEventListener('click', ev => { ev.stopPropagation(); onEdgeClick(edge); });
     }
@@ -157,6 +157,7 @@ export function renderMap(svg, state = {}) {
     const isEv = node.type === 'elevator';
 
     const circle = el('circle', {
+      class: onNodeClick ? 'map-node-hit' : '',
       cx: node.x, cy: node.y, r: (isExit ? 1.5 : 1.0) * s * 0.55,
       fill: isExit ? '#30a46c' : isEv ? '#8f8f8f' : 'var(--node, #6f6f77)',
       stroke: 'var(--map-bg, #fff)', 'stroke-width': s * 0.18,
@@ -197,7 +198,8 @@ export function renderMap(svg, state = {}) {
       cx: fire.x, cy: fire.y, r: s * 0.75,
       fill: '#ff3b30', stroke: '#fff', 'stroke-width': s * 0.15, 'pointer-events': 'none',
     });
-    label(el, fire.x, fire.y - radius - s * 0.5, `화재 반경 ${fire.radius}m`,
+    label(el, fire.x, fire.y - radius - s * 0.5,
+      `${fire.training ? '가상 화재 반경' : '화재 반경'} ${fire.radius}m`,
       { size: s * 0.95, fill: '#ff6a00', weight: 700 });
   }
 

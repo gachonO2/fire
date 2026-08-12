@@ -5,7 +5,7 @@
  * /api/* 는 절대 캐시하지 않는다 — 오래된 위험 정보로 안내하면 안 되기 때문.
  * 서버에 닿지 못하면 api.js가 오프라인 폴백으로 전환하고 사용자에게 그 사실을 알린다.
  */
-const CACHE = 'fireguide-v19';
+const CACHE = 'fireguide-v25';
 
 /**
  * 오프라인이 실제로 필요한 화면만 캐시한다.
@@ -24,6 +24,8 @@ const SHELL = [
   './js/app.js',
   './js/evacuation.js',
   './js/auto-evacuation.js',
+  './js/sos-trigger.js',
+  './js/training-scenario.js',
   './js/direction-scan.js',
   './js/guardian.js',
   './js/guidance.js',

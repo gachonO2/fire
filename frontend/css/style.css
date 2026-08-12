@@ -173,6 +173,7 @@ h3 { font-size: 1.05rem; margin: 18px 0 8px; color: var(--text-dim); }
 
 .minimap text,
 .minimap circle { pointer-events: none; }
+.minimap circle.map-node-hit { pointer-events: auto; }
 
 .minimap {
   width: 100%;

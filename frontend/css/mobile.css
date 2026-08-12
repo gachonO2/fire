@@ -26,15 +26,33 @@
 /* ───────── 상태 표시줄 ───────── */
 .mobile-app .statusbar {
   display: flex;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 10px;
   align-items: center;
-  padding: 6px 12px;
+  min-height: 54px;
+  padding: 8px 16px;
   flex-shrink: 0;
+  border-bottom: 1px solid #24242b;
+  background: #101014;
+}
+
+.mobile-app .app-name {
+  flex-shrink: 0;
+  font-size: 1rem;
+  letter-spacing: -0.02em;
+}
+
+.mobile-app .system-status {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .mobile-app .chip {
-  font-size: 0.72rem;
-  padding: 3px 9px;
+  font-size: 0.68rem;
+  padding: 3px 7px;
   border-radius: 999px;
   background: #1c1c21;
   color: #8b8b98;
@@ -45,6 +63,7 @@
 
 .mobile-app .chip.muted { background: transparent; }
 .mobile-app .chip.warn { background: #4a1d1f; color: #ffb4b6; }
+.mobile-app .chip.training { background: #183b59; color: #b9dcff; }
 
 .mobile-app .test-entry {
   background: #282044;
@@ -73,22 +92,135 @@
 .mobile-app h1 { font-size: 1.9rem; line-height: 1.25; }
 
 /* ───────── 1. 대기 화면 ───────── */
-.idle-head { padding: 12px 0 20px; }
-.idle-state { font-size: 0.95rem; color: #6ee7a8; margin-bottom: 10px; }
-.idle-place { font-size: 2rem; font-weight: 800; line-height: 1.2; }
-.idle-desc { margin-top: 10px; color: #a0a0ab; font-size: 1rem; line-height: 1.55; }
+#screen-idle {
+  display: block;
+  overflow-y: auto;
+  padding-top: 14px;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  scrollbar-width: thin;
+}
 
-/* 대피 시작 — 화면에서 가장 크고, 눈을 감고도 찾을 수 있는 자리 */
+#screen-idle[hidden] { display: none; }
+
+.location-card {
+  padding: 18px;
+  border: 1px solid #30303a;
+  border-radius: 20px;
+  background: #17171c;
+}
+
+.idle-status-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.status-mark {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #73737f;
+  box-shadow: 0 0 0 4px rgba(115, 115, 127, 0.15);
+}
+
+#screen-idle[data-location="verified"] .status-mark {
+  background: #3dd68c;
+  box-shadow: 0 0 0 4px rgba(61, 214, 140, 0.14);
+}
+
+#screen-idle[data-incident="true"] .status-mark {
+  background: #ff6369;
+  box-shadow: 0 0 0 4px rgba(255, 99, 105, 0.16);
+}
+
+.idle-state { color: #b8b8c3; font-size: 0.9rem; font-weight: 700; }
+.section-label {
+  margin-bottom: 5px;
+  color: #8b8b98;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.idle-place { font-size: clamp(1.8rem, 8vw, 2.35rem); font-weight: 850; line-height: 1.2; }
+.idle-desc { margin-top: 10px; color: #b8b8c3; font-size: 0.98rem; line-height: 1.55; }
+.idle-source { margin-top: 8px; color: #6ee7a8; font-size: 0.85rem; font-weight: 700; }
+
+.locate-btn {
+  width: 100%;
+  min-height: 76px;
+  margin-top: 18px;
+  padding: 12px 16px;
+  border: 2px solid #438bd0;
+  border-radius: 16px;
+  background: #173b5e;
+  color: #fff;
+  font-family: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.locate-btn:active { background: #205078; transform: scale(0.99); }
+.locate-btn .action-label { display: block; font-size: 1.22rem; font-weight: 850; }
+.locate-btn .action-sub { display: block; margin-top: 2px; color: #c7e5ff; font-size: 0.8rem; }
+#screen-idle[data-location="verified"] .locate-btn {
+  border-color: #3b6650;
+  background: #172a20;
+}
+#screen-idle[data-location="verified"] .locate-btn .action-sub { color: #a5d6bb; }
+
+#qr-video {
+  width: 100%;
+  max-height: 38vh;
+  margin-top: 12px;
+  border: 2px solid #438bd0;
+  border-radius: 14px;
+  background: #000;
+  object-fit: cover;
+}
+
+.watch-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+  padding: 15px 16px;
+  border: 1px solid #30303a;
+  border-radius: 16px;
+  background: #17171c;
+}
+
+.watch-card h2 { margin: 0 0 3px; font-size: 1rem; }
+.watch-card p { color: #9c9ca8; font-size: 0.78rem; line-height: 1.4; }
+.watch-toggle {
+  min-width: 74px;
+  min-height: 52px;
+  padding: 0 14px;
+  border: 2px solid #494954;
+  border-radius: 999px;
+  background: #24242b;
+  color: #f2f2f5;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.watch-toggle[aria-pressed="true"] { border-color: #30a46c; background: #173826; color: #9aefc1; }
+
+/* 수동 대피 시작 — 위치가 확인됐을 때만 활성화한다 */
 .emergency-btn {
-  flex: 1;
-  min-height: 190px;
+  width: 100%;
+  min-height: 112px;
+  margin-top: 14px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 6px;
   border: none;
-  border-radius: 24px;
+  border-radius: 18px;
   background: linear-gradient(160deg, #f0353a, #b91c1e);
   color: #fff;
   font-family: inherit;
@@ -96,25 +228,20 @@
   box-shadow: 0 10px 30px rgba(229, 72, 77, 0.3);
 }
 
-/* 감시를 켜기 전에는 위급한 색이 아니어야 한다 — 평상시 화면이기 때문 */
-.emergency-btn:not(.armed) {
-  background: linear-gradient(160deg, #1f7a4d, #14603a);
-  box-shadow: 0 10px 30px rgba(48, 164, 108, 0.22);
-}
-
 .emergency-btn:disabled {
-  background: #2a2126;
-  color: #7c6a6d;
+  border: 2px solid #33333d;
+  background: #1b1b20;
+  color: #74747f;
   box-shadow: none;
+  cursor: not-allowed;
 }
 
 .emergency-btn:active:not(:disabled) { transform: scale(0.985); }
 .eb-icon { font-size: 3.2rem; line-height: 1; }
 .eb-icon:empty { display: none; }
-.eb-label { font-size: 2.3rem; font-weight: 900; letter-spacing: -0.02em; }
+.eb-label { font-size: 1.65rem; font-weight: 900; letter-spacing: -0.02em; }
 .eb-sub { font-size: 0.9rem; opacity: 0.85; }
-
-.idle-actions { display: grid; gap: 8px; margin-top: 14px; }
+.emergency-note { margin: 7px 4px 0; color: #858590; font-size: 0.74rem; text-align: center; }
 
 .ghost-btn {
   min-height: 56px;
@@ -141,7 +268,7 @@
 
 /* 설정(보호자) — 평상시에 하는 일이므로 접어 둔다 */
 .mobile-app .settings {
-  margin-top: 14px;
+  margin-top: 10px;
   padding: 12px 14px;
   background: #16161a;
   border-radius: 14px;
@@ -156,6 +283,24 @@
   font-size: 0.95rem;
   padding: 4px 0;
 }
+
+.mobile-app .settings .ghost-btn { margin-top: 10px; }
+
+.training-start-btn {
+  width: 100%;
+  min-height: 78px;
+  padding: 12px 14px;
+  border: 2px solid #438bd0;
+  border-radius: 14px;
+  background: #173b5e;
+  color: #fff;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.training-start-btn strong { display: block; font-size: 1.08rem; }
+.training-start-btn span { display: block; margin-top: 3px; color: #c7e5ff; font-size: 0.78rem; line-height: 1.4; }
+.training-start-btn:active { background: #205078; }
 
 .mobile-app .settings label {
   display: block;
@@ -186,8 +331,6 @@
 }
 
 /* 위치 선택 시트 */
-.idle-source { margin-top: 8px; font-size: 0.85rem; color: #6ee7a8; }
-
 .sheet {
   position: fixed;
   inset: 0;
@@ -214,6 +357,23 @@
 .sheet-inner h2 { font-size: 1.3rem; margin-bottom: 8px; }
 .sheet-inner .hint { margin-bottom: 12px; }
 .sheet .picker { display: grid; gap: 8px; margin-top: 12px; }
+
+.method-sheet { display: grid; gap: 10px; }
+.method-btn {
+  min-height: 76px;
+  padding: 12px 14px;
+  border: 2px solid #34343e;
+  border-radius: 14px;
+  background: #1f1f26;
+  color: #f2f2f5;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.method-btn strong { display: block; font-size: 1.08rem; }
+.method-btn span { display: block; margin-top: 3px; color: #a0a0ab; font-size: 0.8rem; line-height: 1.4; }
+.method-btn:active { background: #292932; }
+.method-status { min-height: 1.4em; color: #8ecbff; font-size: 0.85rem; }
 
 .sheet .pick-btn {
   min-height: 64px;
@@ -273,7 +433,39 @@
   color: #a0a0ab;
 }
 
-.tap-hint { font-size: 0.76rem; color: #6f6f77; line-height: 1.5; }
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.guide-quick-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.guide-quick-actions button {
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 1px solid #3a4f42;
+  border-radius: 12px;
+  background: #19241d;
+  color: #d9e9df;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 750;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.guide-quick-actions button:active { background: #22332a; }
 
 .mini-map {
   flex-shrink: 0;
@@ -291,32 +483,6 @@
   display: grid;
   gap: 8px;
   padding-top: 10px;
-}
-
-.sos-btn {
-  position: relative;
-  min-height: 76px;
-  border: 2px solid #ff6369;
-  border-radius: 18px;
-  background: #3a1416;
-  color: #fff;
-  font-size: 1.25rem;
-  font-weight: 800;
-  font-family: inherit;
-  cursor: pointer;
-  overflow: hidden;
-  touch-action: none;
-}
-
-.sos-btn span { position: relative; z-index: 1; }
-
-/* 누르고 있는 동안 차오른다 */
-.sos-fill {
-  position: absolute;
-  left: 0; top: 0; bottom: 0;
-  width: 0;
-  background: #b91c1e;
-  z-index: 0;
 }
 
 /* ───────── 3·4. 안전 대기 / 완료 ───────── */
@@ -346,6 +512,8 @@
 
 .danger-screen { background: #2a0f11; }
 .danger-screen .hold-icon { animation: sos-pulse 1.3s ease-in-out infinite; }
+.danger-screen.training-hold { background: #102334; }
+.danger-screen.training-hold .hold-icon { animation: none; }
 .safe-screen { background: #0f2418; }
 
 @keyframes sos-pulse { 50% { opacity: 0.45; } }
@@ -370,10 +538,23 @@
 /* ───────── 가로 모드: 지도를 접고 글자를 지킨다 ───────── */
 @media (orientation: landscape) and (max-height: 520px) {
   .mini-map, .mobile-app .demo-panel { display: none; }
-  .idle-head { padding: 4px 0 10px; }
-  .emergency-btn { min-height: 120px; }
+  #screen-idle { padding-top: 8px; }
+  .location-card { padding: 12px 14px; }
+  .idle-status-line { margin-bottom: 8px; }
+  .idle-desc { margin-top: 5px; }
+  .locate-btn { min-height: 62px; margin-top: 9px; }
+  .watch-card { padding: 10px 14px; }
+  .emergency-btn { min-height: 88px; }
   .eb-icon { font-size: 2rem; }
   .eb-label { font-size: 1.7rem; }
+}
+
+@media (max-width: 370px) {
+  .mobile-app .statusbar { padding-inline: 12px; }
+  .mobile-app .chip.muted { display: none; }
+  .location-card { padding: 15px; }
+  .watch-card { gap: 8px; padding: 13px; }
+  .watch-toggle { min-width: 66px; padding-inline: 10px; }
 }
 
 /* ───────── 큰 화면에서는 폰 크기로 가둔다 ───────── */

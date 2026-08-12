@@ -3,7 +3,7 @@
  *
  * 설계 기준은 "화면을 보지 않고 한 손으로 쓸 수 있는가"다.
  *  · 화면 전체가 버튼 — 두드리면 다시 듣기, 두 번이면 현재 위치
- *  · 구조요청은 길게 눌러야 나간다 (주머니 속 오발신 방지)
+ *  · 볼륨 올리기 버튼은 4초 안에 세 번 눌러야 구조 요청이 전송된다
  *  · 대피가 시작되면 방향 찾기가 자동으로 켜지고, 화면이 꺼지지 않는다
  *  · 앱이 죽었다 켜져도 대피 상태를 이어서 복구한다
  *
@@ -20,10 +20,12 @@ import { renderMap } from './minimap.js';
 import {
   automaticEvacuationAction, alarmHazardKeys, hasNewFire, hasNewSetValue,
 } from './auto-evacuation.js';
+import { advanceSosPress, isVolumeUpInput } from './sos-trigger.js';
+import { createSafeTrainingScenario } from './training-scenario.js';
 
 const $ = id => document.getElementById(id);
 
-const SOS_HOLD_MS = 1500;      // 구조요청을 누르고 있어야 하는 시간
+const SOS_PRESS_WINDOW_MS = 4000;
 const RESUME_KEY = 'fireguide:session';
 
 const api = new Api();
@@ -42,6 +44,12 @@ let pendingFire = false;
 let pendingStartTimer = null;
 let knownFireIds = new Set();
 let knownAlarmHazards = new Set();
+let trainingWaitingForPlace = false;
+let trainingFire = null;
+let trainingStartTimer = null;
+let sosPressCount = 0;
+let sosResetTimer = null;
+let guardianNotice = '';
 
 /** 보호자 연동이 새로고침 후에도 유지되도록 사용자 ID를 기기에 고정한다. */
 function persistentUserId() {
@@ -79,24 +87,27 @@ async function main() {
         $('idle-place').textContent = '위치 확인 필요';
         $('idle-desc').textContent = '도면이 변경되었습니다. 안내 태그나 QR로 현재 위치를 다시 확인하세요.';
         $('idle-source').textContent = '';
+        updateIdleUI();
       }
       buildStartPicker();
     }
     render();
   });
   api.on('hazards', (h, meta = {}) => {
-    session.hazardsChanged(h);
     const current = alarmHazardKeys(h, api.floorPlan.initialHazards);
     const newIncident = !meta.initial && hasNewSetValue(knownAlarmHazards, current);
     knownAlarmHazards = current;
-    maybeAutoEvacuate({ newIncident });
+    const interruptedTraining = newIncident && interruptTrainingForActualIncident();
+    session.hazardsChanged(h);
+    maybeAutoEvacuate({ newIncident, force: interruptedTraining });
   });
   api.on('sensors', list => { sensors = list; render(); });
   api.on('fires', (list, meta = {}) => {
     const newIncident = !meta.initial && hasNewFire(knownFireIds, list);
     fires = list;
     knownFireIds = new Set(list.map(fire => fire.id).filter(Boolean));
-    maybeAutoEvacuate({ newIncident });
+    const interruptedTraining = newIncident && interruptTrainingForActualIncident();
+    maybeAutoEvacuate({ newIncident, force: interruptedTraining });
     render();
   });
   api.on('status', ({ online, storage }) => {
@@ -125,13 +136,27 @@ async function main() {
 
 // ══════════════════════════════════════════════════════ 대기 화면
 function wireIdleScreen() {
-  $('btn-start').addEventListener('click', () => {
-    if (!armed) armWatch();          // 평상시: 감시를 켜 둔다
-    else startEvacuation();          // 자동이 안 될 때를 위한 수동 시작
-  });
+  $('btn-start').addEventListener('click', () => startEvacuation());
+  $('btn-watch').addEventListener('click', toggleWatch);
+  $('btn-training-start').addEventListener('click', startVirtualTraining);
   $('btn-locate').addEventListener('click', locateNow);
-  $('btn-pick').addEventListener('click', () => openSheet(true));
-  $('btn-sheet-close').addEventListener('click', () => openSheet(false));
+  $('btn-nfc').addEventListener('click', async () => {
+    $('locate-method-status').textContent = '안내 태그를 기다리고 있습니다.';
+    const started = await startNfcScan({ silent: false });
+    if (!started) {
+      $('locate-method-status').textContent = '이 기기에서는 안내 태그를 사용할 수 없습니다. QR 표지를 촬영하세요.';
+    }
+  });
+  $('btn-qr').addEventListener('click', () => {
+    openLocateSheet(false);
+    scanQR();
+  });
+  $('btn-locate-close').addEventListener('click', () => openLocateSheet(false));
+  $('btn-pick').addEventListener('click', () => {
+    trainingWaitingForPlace = false;
+    openSheet(true);
+  });
+  $('btn-sheet-close').addEventListener('click', cancelPlaceSheet);
   $('btn-restart').addEventListener('click', returnToIdle);
   $('btn-restart-2').addEventListener('click', returnToIdle);
   $('btn-hold-where').addEventListener('click', () => session.describeHere());
@@ -139,16 +164,38 @@ function wireIdleScreen() {
   // 시트가 열린 채로 뒤 화면을 누르면 아무 반응이 없어 앱이 멈춘 것처럼 보인다.
   // 배경을 누르거나 ESC를 눌러도 닫히게 한다.
   const sheet = $('place-sheet');
-  sheet.addEventListener('click', e => { if (e.target === sheet) openSheet(false); });
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && !sheet.hidden) openSheet(false);
+  sheet.addEventListener('click', e => { if (e.target === sheet) cancelPlaceSheet(); });
+  const locateSheet = $('locate-sheet');
+  locateSheet.addEventListener('click', e => {
+    if (e.target === locateSheet) openLocateSheet(false);
   });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (!sheet.hidden) cancelPlaceSheet();
+    if (!locateSheet.hidden) openLocateSheet(false);
+  });
+}
+
+function openLocateSheet(open) {
+  $('locate-sheet').hidden = !open;
+  $('locate-method-status').textContent = '';
+  if (open) $('btn-nfc').focus();
+  else $('btn-locate').focus();
 }
 
 function openSheet(open) {
   $('place-sheet').hidden = !open;
+  $('place-sheet-title').textContent = trainingWaitingForPlace ? '훈련 시작 위치 선택' : '위치 직접 지정';
+  $('place-sheet-hint').textContent = trainingWaitingForPlace
+    ? '가상 화재 훈련을 시작할 위치를 선택하세요. 실제 위치나 신고에는 반영되지 않습니다.'
+    : '동행자·훈련용입니다. 실제로는 벽의 안내 태그로 자동 확인됩니다.';
   if (open) $('start-picker').querySelector('button')?.focus();
   else $('btn-locate').focus();
+}
+
+function cancelPlaceSheet() {
+  trainingWaitingForPlace = false;
+  openSheet(false);
 }
 
 function buildStartPicker() {
@@ -160,8 +207,14 @@ function buildStartPicker() {
     btn.className = 'pick-btn';
     btn.textContent = node.name;
     btn.addEventListener('click', () => {
-      setStartPlace(node.id, { speak: true, source: '직접 선택' });
+      const startTrainingAfterSelection = trainingWaitingForPlace;
+      setStartPlace(node.id, {
+        speak: !startTrainingAfterSelection,
+        source: startTrainingAfterSelection ? '훈련 시작 위치' : '직접 선택',
+      });
+      trainingWaitingForPlace = false;
       openSheet(false);
+      if (startTrainingAfterSelection) startVirtualTraining();
     });
     wrap.appendChild(btn);
   }
@@ -233,10 +286,10 @@ async function detectPlace() {
   startNfcScan({ silent: true });
 }
 
-/** 지금 위치 확인 — NFC와 QR을 함께 시도한다 */
-async function locateNow() {
-  const nfc = await startNfcScan({ silent: false });
-  if (!nfc) await scanQR();
+/** 한 버튼에서 인식 방법을 추측하지 않고 사용자가 만진 표지에 맞는 방법을 고르게 한다. */
+function locateNow() {
+  openLocateSheet(true);
+  guidance.speak('현재 위치 확인 방법을 선택하세요. 안내 태그 또는 QR 표지를 사용할 수 있습니다.');
 }
 
 /**
@@ -257,6 +310,7 @@ async function startNfcScan({ silent }) {
           ? value
           : new URL(value, location.href).searchParams?.get('at'));
         if (nodeId && setStartPlace(nodeId, { speak: true, source: '안내 태그' })) {
+          openLocateSheet(false);
           navigator.vibrate?.([80, 60, 80]);
           return;
         }
@@ -318,6 +372,53 @@ function safeParam(raw, key) {
   catch (_) { return null; }
 }
 
+// ══════════════════════════════════════════════════════ 가상 화재 훈련
+function startVirtualTraining() {
+  if (session.phase !== 'idle' || session.trainingMode) return;
+  const verified = placeVerified && verifiedPlanId === api.floorPlan.id && session.startNodeId;
+  if (!verified) {
+    trainingWaitingForPlace = true;
+    openSheet(true);
+    guidance.speak('가상 화재 훈련을 시작할 위치를 선택하세요.');
+    return;
+  }
+
+  const scenario = createSafeTrainingScenario(api.floorPlan, session.startNodeId, session.hazards);
+  if (!scenario) {
+    guidance.speak('이 위치에서는 가상 화재 훈련 경로를 만들 수 없습니다. 다른 위치를 선택하세요.');
+    return;
+  }
+
+  trainingFire = scenario.fire;
+  session.beginTraining(scenario.hazards);
+  document.querySelector('.utility-settings')?.removeAttribute('open');
+  guidance.cmdTrainingAlarm(`${scenario.where} 부근에서 가상 화재가 발생했습니다.`);
+  render();
+
+  clearTimeout(trainingStartTimer);
+  trainingStartTimer = setTimeout(() => {
+    trainingStartTimer = null;
+    if (session.trainingMode && session.phase === 'idle') startEvacuation();
+  }, 2600);
+}
+
+/** 훈련 중 실제 서버 경보가 오면 훈련을 즉시 끝내고 실제 화재 처리를 우선한다. */
+function interruptTrainingForActualIncident() {
+  if (!session?.trainingMode) return false;
+  const nodeId = session.currentNodeId || session.startNodeId;
+  clearTimeout(trainingStartTimer);
+  trainingStartTimer = null;
+  trainingFire = null;
+  trainingWaitingForPlace = false;
+  resetSosPress();
+  session.reset();
+  if (nodeId && api.floorPlan.getNode(nodeId)) {
+    setStartPlace(nodeId, { source: '훈련 중 확인 위치' });
+  }
+  showScreen('idle');
+  return true;
+}
+
 // ══════════════════════════════════════════════════════ 대피 시작
 // ══════════════════════════════════════════════ 화재 자동 감지 → 자동 대피
 /**
@@ -347,7 +448,7 @@ function fireIsActive() {
 }
 
 /** 화재를 감지하면 스스로 대피를 시작한다 */
-async function maybeAutoEvacuate({ newIncident = false } = {}) {
+async function maybeAutoEvacuate({ newIncident = false, force = false } = {}) {
   const active = fireIsActive();
   if (!active) {
     clearTimeout(pendingStartTimer);
@@ -362,7 +463,7 @@ async function maybeAutoEvacuate({ newIncident = false } = {}) {
   if (!newIncident) return;
 
   const action = automaticEvacuationAction({
-    armed,
+    armed: armed || force,
     alarmHandled,
     phase: session.phase,
     fireActive: active,
@@ -436,20 +537,49 @@ function armWatch() {
   guidance.speak('화재 감시를 시작합니다. 불이 나면 자동으로 알려드립니다.');
 }
 
+function disarmWatch() {
+  armed = false;
+  pendingFire = false;
+  alarmHandled = false;
+  clearTimeout(pendingStartTimer);
+  pendingStartTimer = null;
+  localStorage.removeItem('fireguide:armed');
+  updateIdleUI();
+  guidance.speak('화재 자동 알림을 껐습니다.');
+}
+
+function toggleWatch() {
+  if (armed) disarmWatch();
+  else armWatch();
+}
+
 function updateIdleUI() {
+  const verified = placeVerified && verifiedPlanId === api.floorPlan.id && Boolean(session?.startNodeId);
+  $('screen-idle').dataset.location = verified ? 'verified' : 'unknown';
+  $('screen-idle').dataset.incident = String(pendingFire);
   $('idle-state').textContent = pendingFire
-    ? '화재 감지 · 위치 확인 필요'
-    : armed ? '화재 감시 중 · 안전' : '감시 꺼짐';
-  $('eb-label').textContent = pendingFire
-    ? '현재 위치 확인'
-    : armed ? '지금 바로 대피' : '화재 감시 시작';
+    ? '새 화재 경보 · 위치 확인 필요'
+    : armed ? '화재 자동 알림 켜짐' : '화재 자동 알림 꺼짐';
+
+  $('locate-label').textContent = verified ? '현재 위치 다시 확인' : '내 위치 확인';
+  $('locate-sub').textContent = verified
+    ? '이동했거나 위치가 다르면 다시 확인하세요'
+    : '안내 태그 또는 QR 표지 사용';
+
+  $('btn-watch').setAttribute('aria-pressed', String(armed));
+  $('btn-watch').textContent = armed ? '끄기' : '켜기';
+  $('watch-desc').textContent = armed
+    ? verified
+      ? '새 화재가 발생하면 진동과 음성으로 알리고 대피 안내를 시작합니다.'
+      : '새 화재를 알려드립니다. 자동 대피 안내에는 현재 위치 확인이 필요합니다.'
+    : '꺼져 있습니다. 켜 두면 새 화재를 진동과 음성으로 알려드립니다.';
+
+  $('eb-label').textContent = '대피 안내 시작';
   $('eb-icon').textContent = '';
-  $('eb-sub').textContent = pendingFire
-    ? 'QR이나 안내 태그로 위치를 확인하면 안내가 시작됩니다'
-    : armed
-    ? '위치가 확인된 경우에만 자동으로 시작됩니다 · 눌러서 수동 시작'
-    : '눌러 두면 불이 났을 때 자동으로 안내합니다';
-  $('btn-start').classList.toggle('armed', armed);
+  $('eb-sub').textContent = verified
+    ? `${api.floorPlan.getNode(session.startNodeId)?.name ?? '확인된 위치'}에서 안전한 출구를 찾습니다`
+    : '현재 위치를 확인하면 사용할 수 있습니다';
+  $('btn-start').disabled = !verified;
 }
 
 /**
@@ -471,6 +601,7 @@ async function startEvacuation({ auto = false } = {}) {
   }
 
   await keepScreenAwake();
+  resetSosPress();
   $('btn-start').disabled = true;
   showScreen('guide');
 
@@ -520,50 +651,67 @@ function wireGestures() {
     if (dy > 70) toggleScan(); // 위로 쓸기
   }, { passive: true });
 
-  wireSosHold();
+  $('btn-guide-repeat').addEventListener('click', e => {
+    e.stopPropagation();
+    guidance.repeat();
+  });
+  $('btn-guide-where').addEventListener('click', e => {
+    e.stopPropagation();
+    session.describeHere();
+  });
+
+  wireSosTriggers();
 }
 
 /**
- * 구조요청은 눌러서 유지해야 나간다.
- * 주머니에 넣고 걷다가 눌리면 구조대를 헛되이 부르게 되기 때문이다.
- * 진행 상황을 채워지는 막대와 진동으로 알려준다.
+ * 볼륨 올리기 버튼을 4초 안에 세 번 누르면 구조 요청을 전송한다.
+ * 모바일 웹의 볼륨 키 전달은 기기마다 달라 신뢰할 수 없으므로 네이티브 셸은
+ * fireguide:volume-up 이벤트 또는 window.fireGuideVolumeUp()을 호출한다.
  */
-function wireSosHold() {
-  const btn = $('btn-sos');
-  const fill = $('sos-fill');
-  let startedAt = 0;
-  let raf = null;
+function wireSosTriggers() {
+  window.addEventListener('keydown', event => {
+    if (event.repeat || !isVolumeUpInput(event)) return;
+    event.preventDefault();
+    receiveVolumeUp();
+  });
 
-  const stop = () => {
-    cancelAnimationFrame(raf);
-    raf = null;
-    fill.style.width = '0%';
-    $('sos-label').textContent = '길게 눌러 구조요청';
-  };
+  window.addEventListener('fireguide:volume-up', receiveVolumeUp);
+  window.fireGuideVolumeUp = receiveVolumeUp;
+  $('btn-volume-up-demo').addEventListener('click', receiveVolumeUp);
+}
 
-  const tick = () => {
-    const ratio = Math.min(1, (Date.now() - startedAt) / SOS_HOLD_MS);
-    fill.style.width = `${ratio * 100}%`;
-    $('sos-label').textContent = ratio < 1 ? '계속 누르고 계세요…' : '길게 눌러 구조요청';
-    if (ratio >= 1) {
-      stop();
-      session.enterSafeHold('사용자가 직접 구조를 요청했습니다.');
-      return;
-    }
-    raf = requestAnimationFrame(tick);
-  };
+function receiveVolumeUp() {
+  if (session.phase !== 'guiding') return;
+  const state = advanceSosPress(sosPressCount);
+  sosPressCount = state.count;
 
-  const begin = e => {
-    e.preventDefault();
-    startedAt = Date.now();
-    navigator.vibrate?.(30);
-    raf = requestAnimationFrame(tick);
-  };
+  if (state.complete) {
+    clearTimeout(sosResetTimer);
+    sosResetTimer = null;
+    $('sos-status').textContent = '구조 요청을 전송합니다.';
+    navigator.vibrate?.([120, 80, 120, 80, 300]);
+    session.enterSafeHold('볼륨 올리기 버튼이 세 번 입력되어 구조를 요청했습니다.');
+    return;
+  }
 
-  btn.addEventListener('pointerdown', begin);
-  btn.addEventListener('pointerup', stop);
-  btn.addEventListener('pointercancel', stop);
-  btn.addEventListener('pointerleave', stop);
+  $('sos-status').textContent = `${state.count}번 입력됐습니다. ${state.remaining}번 더 누르세요.`;
+  navigator.vibrate?.(state.count === 1 ? [90] : [90, 70, 90]);
+  guidance.speak(`${state.count}번 입력됐습니다. ${state.remaining}번 더 누르세요.`, { remember: false });
+
+  if (state.count === 1) {
+    clearTimeout(sosResetTimer);
+    sosResetTimer = setTimeout(() => resetSosPress({ announce: true }), SOS_PRESS_WINDOW_MS);
+  }
+}
+
+function resetSosPress({ announce = false } = {}) {
+  clearTimeout(sosResetTimer);
+  sosResetTimer = null;
+  sosPressCount = 0;
+  $('sos-status').textContent = '구조가 필요하면 볼륨 올리기 버튼을 빠르게 세 번 누르세요.';
+  if (announce && session?.phase === 'guiding') {
+    guidance.speak('입력 시간이 지나 구조 요청이 취소되었습니다.', { remember: false });
+  }
 }
 
 function toggleScan() {
@@ -580,7 +728,7 @@ function toggleScan() {
 scanner.onUpdate = ({ active, error, level, reason }) => {
   if (!active) return;
   if (reason === 'no-heading') {
-    $('scan-status').textContent = '나침반을 사용할 수 없습니다';
+    $('scan-status').textContent = '방향 센서 신호를 기다리고 있습니다';
     $('scan-status').dataset.level = 'none';
     return;
   }
@@ -703,7 +851,7 @@ function showGuardian(saved) {
   $('btn-open-guardian').href = link;
   $('guardian-result').hidden = false;
   $('btn-guardian-save').textContent = '보호자 정보 수정';
-  $('hold-guardian').textContent = `보호자 ${saved.name} 님에게도 알렸습니다.`;
+  guardianNotice = `보호자 ${saved.name} 님에게도 알렸습니다.`;
 }
 
 async function copyGuardianLink() {
@@ -752,14 +900,23 @@ function showScreen(name) {
 
 function render() {
   if (!session) return;
+  const training = Boolean(session.trainingMode);
+  $('training-chip').hidden = !training;
 
   $('g-exit').textContent = session.exitName ? `→ ${session.exitName}` : '—';
   $('g-steps').textContent = session.stepsLeft != null ? `${session.stepsLeft}걸음` : '—';
 
   if (session.phase === 'safehold') {
     showScreen('hold');
+    $('screen-hold').classList.toggle('training-hold', training);
     $('hold-reason').textContent = session.lastCommand;
     $('hold-place').textContent = api.floorPlan.getNode(session.currentNodeId)?.name ?? '—';
+    $('hold-icon').textContent = training ? '훈련' : 'SOS';
+    $('hold-title').textContent = training ? '훈련 결과: 대피 경로 없음' : '그 자리에서 기다리세요';
+    $('hold-where-label').textContent = training ? '훈련 시작 위치' : '구조대에 전달된 내 위치';
+    $('hold-guardian').textContent = training
+      ? '훈련이므로 구조 요청과 보호자 알림은 전송되지 않았습니다.'
+      : guardianNotice;
     stopAutoWalk();
     scanner.stop();   // 제자리에서 기다려야 한다. 방향 신호는 움직이게 만든다.
     releaseAll();
@@ -771,13 +928,21 @@ function render() {
     releaseAll();
   }
 
+  if (session.phase !== 'safehold') {
+    $('screen-hold').classList.remove('training-hold');
+    $('hold-icon').textContent = 'SOS';
+    $('hold-title').textContent = '그 자리에서 기다리세요';
+    $('hold-where-label').textContent = '구조대에 전달된 내 위치';
+    $('hold-guardian').textContent = guardianNotice;
+  }
+
   saveSession();
 
   renderMap($('minimap'), {
     floorPlan: api.floorPlan,
     backgroundImage: api.backgroundImage,
     hazards: session.hazards,
-    sensors, fires,
+    sensors, fires: trainingFire ? [...fires, trainingFire] : fires,
     route: session.route,
     userPos: session.position(),
   });
@@ -792,9 +957,14 @@ function releaseAll() {
 
 function returnToIdle() {
   stopAutoWalk();
+  resetSosPress();
   scanner.stop();
   clearTimeout(pendingStartTimer);
+  clearTimeout(trainingStartTimer);
   pendingStartTimer = null;
+  trainingStartTimer = null;
+  trainingFire = null;
+  trainingWaitingForPlace = false;
   localStorage.removeItem(RESUME_KEY);
   session.reset();
   placeVerified = false;

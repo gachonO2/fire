@@ -30,6 +30,7 @@ async function main() {
         b.setAttribute('aria-pressed', String(b === btn)));
       $('temp-controls').hidden = currentTool !== 'temp';
       $('fire-controls').hidden = currentTool !== 'ignite';
+      draw();
     });
   });
 
@@ -121,8 +122,10 @@ function draw() {
     fires,
     positions,
     onMapClick: (x, y) => { if (currentTool === 'ignite') ignite(x, y); },
-    onEdgeClick: edge => applyTool({ edge }),
-    onNodeClick: node => { if (currentTool === 'temp') applyTool({ node }); },
+    // 화재 배치 중에는 통로·지점용 클릭 영역을 만들지 않는다.
+    // 그래야 내부 통로나 지점을 눌러도 지도 좌표 클릭으로 화재가 배치된다.
+    onEdgeClick: currentTool === 'ignite' ? null : edge => applyTool({ edge }),
+    onNodeClick: currentTool === 'temp' ? node => applyTool({ node }) : null,
   });
 }
 

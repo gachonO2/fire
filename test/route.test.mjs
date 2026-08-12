@@ -9,6 +9,8 @@ import { EvacuationSession } from '../frontend/js/evacuation.js';
 import {
   automaticEvacuationAction, alarmHazardKeys, hasNewFire, hasNewSetValue,
 } from '../frontend/js/auto-evacuation.js';
+import { advanceSosPress, isVolumeUpInput } from '../frontend/js/sos-trigger.js';
+import { createSafeTrainingScenario } from '../frontend/js/training-scenario.js';
 import { hazardsFromSensors, hazardsFromFires, nodesInFire, mergeHazards, TEMP } from '../shared/hazard-rules.js';
 
 let failed = 0;
@@ -44,6 +46,24 @@ const liveAlarmKeys = alarmHazardKeys({
   E6: { type: 'smoke' }, E2: { type: 'smoke', sensorId: 'SD-301' },
 }, DEFAULT_PLAN.initialHazards);
 expect('새 센서 경보는 사건으로 판정', hasNewSetValue(baselineAlarmKeys, liveAlarmKeys));
+const sosFirst = advanceSosPress(0);
+const sosSecond = advanceSosPress(sosFirst.count);
+const sosThird = advanceSosPress(sosSecond.count);
+expect('구조 요청 첫 입력은 두 번 더 필요', sosFirst.remaining === 2 && !sosFirst.complete);
+expect('구조 요청 두 번째 입력은 한 번 더 필요', sosSecond.remaining === 1 && !sosSecond.complete);
+expect('구조 요청은 세 번째 입력에서만 완료', sosThird.remaining === 0 && sosThird.complete);
+expect('볼륨 올리기 키 입력을 구조 요청 입력으로 판별', isVolumeUpInput({ key: 'AudioVolumeUp' }));
+expect('일반 키 입력은 구조 요청 입력에서 제외', !isVolumeUpInput({ key: 'ArrowUp' }));
+
+const trainingOffice = new FloorPlan(TEST_PLANS.find(item => item.id === 'test-office'));
+const oneRouteHazards = {
+  OE2: { type: 'fire' },
+  OE5: { type: 'fire' },
+};
+const safeTraining = createSafeTrainingScenario(trainingOffice, 'OP3', oneRouteHazards);
+expect('우회로가 하나뿐이어도 가상 화재 훈련 경로를 유지', Boolean(safeTraining?.route));
+expect('가상 화재는 남은 유일한 대피 경로를 막지 않음',
+  safeTraining?.route?.edges.every(edge => !safeTraining.hazards[edge.id]));
 
 // ----------------------------------------------------------------- 경로탐색
 const r1 = routeToNearestExit(plan, 'N1', smoke);
@@ -123,6 +143,32 @@ relocation.moveFreelyTo(31.4, 10.2);
 const freeMoveBackward = relocation.moveFreelyTo(30.97, 10.75);
 expect('경로 위라도 반대 방향으로 걸으면 직진 안내 중단',
   freeMoveBackward.status === 'wrong-direction' && relocation.lastCommand.includes('진행 방향이 잘못되었습니다'));
+
+let trainingServerRouteCalls = 0;
+let trainingPositionReports = 0;
+const trainingApi = {
+  floorPlan: relocationFloor,
+  async computeRoute() { trainingServerRouteCalls++; return { route: null, ms: 0 }; },
+  updatePosition() { trainingPositionReports++; },
+  sendSOS() { throw new Error('훈련에서 실제 구조요청을 보내면 안 됩니다.'); },
+};
+const trainingGuidance = {
+  onAnnounce: null,
+  speak(text) { this.onAnnounce?.(text); },
+  cmdStart() {}, cmdDanger() {}, cmdSOS() {}, cmdStraight() {}, cmdTurn() {}, cmdArrive() {},
+  cmdStop() {}, cmdWrongWay() {}, cmdReroute() {},
+};
+const trainingSession = new EvacuationSession({
+  api: trainingApi, guidance: trainingGuidance, userId: 'training-person',
+});
+trainingSession.setStart('OP1');
+trainingSession.beginTraining({ OE3: { type: 'fire', label: '가상 화재', training: true } });
+await trainingSession.start();
+expect('가상 훈련은 서버 경로 API를 호출하지 않음', trainingServerRouteCalls === 0);
+expect('가상 화재를 피해 로컬 우회 경로 계산',
+  trainingSession.route?.edges.every(edge => edge.id !== 'OE3') && trainingSession.exitName.includes('동쪽'));
+expect('가상 훈련 위치는 보호자·관제에 전송하지 않음', trainingPositionReports === 0);
+trainingSession.reset();
 
 const t0 = performance.now();
 for (let i = 0; i < 100; i++) routeToNearestExit(plan, 'N1', smoke);

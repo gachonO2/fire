@@ -26,6 +26,7 @@ const VIBRATION = {
   arrive:   [250, 120, 250, 120, 700],
   // 자동 화재 경보 — 다른 어떤 신호와도 헷갈리지 않게 길고 반복적으로
   alarm:    [500, 200, 500, 200, 500, 200, 900],
+  training: [300, 160, 300],
 };
 
 export class Guidance {
@@ -42,9 +43,11 @@ export class Guidance {
     }
   }
 
-  speak(text, { interrupt = true } = {}) {
-    this.lastText = text;
-    if (this.onAnnounce) this.onAnnounce(text);
+  speak(text, { interrupt = true, remember = true } = {}) {
+    if (remember) {
+      this.lastText = text;
+      if (this.onAnnounce) this.onAnnounce(text);
+    }
     if (!('speechSynthesis' in window)) return;
     if (interrupt) speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
@@ -61,7 +64,7 @@ export class Guidance {
   // ------------------------------------------------ 6개 명령
   cmdStart(exitName) {
     this.vibrate('start');
-    this.speak(`대피 모드를 시작합니다. 목표는 ${exitName}입니다.`);
+    this.speak(`대피 모드를 시작합니다. 목표는 ${exitName}입니다. 구조가 필요하면 볼륨 올리기 버튼을 빠르게 세 번 누르세요.`);
   }
 
   /**
@@ -78,6 +81,11 @@ export class Guidance {
   cmdAlarmNeedsLocation(whereText) {
     if (navigator.vibrate) navigator.vibrate(VIBRATION.alarm);
     this.speak(`화재가 감지되었습니다. ${whereText} 현재 위치를 먼저 확인해야 합니다. 벽의 안내 태그나 QR을 확인하세요.`);
+  }
+
+  cmdTrainingAlarm(whereText) {
+    if (navigator.vibrate) navigator.vibrate(VIBRATION.training);
+    this.speak(`가상 화재 훈련입니다. 실제 화재가 아닙니다. ${whereText} 대피 훈련을 시작합니다.`);
   }
 
   cmdStraight(steps, wall) {
