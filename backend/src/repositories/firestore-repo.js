@@ -2,7 +2,6 @@ import { initializeApp, applicationDefault, cert } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 import { readFileSync } from 'node:fs';
 import { config } from '../config.js';
-import { DEFAULT_PLAN } from '../../../shared/default-plan.js';
 import { publish } from '../events.js';
 import { generateCode, normalizeCode } from '../guardian-code.js';
 
@@ -54,13 +53,6 @@ export class FirestoreRepo {
 
     this._watch('sensors', snap => publish('sensors', snap.docs.map(d => d.data())));
 
-    // 도면이 하나도 없으면 기본 시연 도면을 넣어 둔다
-    const plans = await this.db.collection('plans').limit(1).get();
-    if (plans.empty) {
-      await this.savePlan(DEFAULT_PLAN);
-      await this.activatePlan(DEFAULT_PLAN.id);
-    }
-
     const existing = await this.db.collection('hazards').limit(1).get();
     if (existing.empty) await this.resetHazards();
   }
@@ -68,11 +60,13 @@ export class FirestoreRepo {
   // ------------------------------------------------------------------ plans
   async _activePlanId() {
     const doc = await this.db.collection('config').doc('settings').get();
-    return doc.exists ? doc.data().activePlanId : DEFAULT_PLAN.id;
+    return doc.exists ? doc.data().activePlanId : null;
   }
 
   async getActivePlan() {
-    return (await this.getPlan(await this._activePlanId())) || DEFAULT_PLAN;
+    // 없으면 null — 없는데 있는 척하면 엉뚱한 건물을 안내한다
+    const id = await this._activePlanId();
+    return id ? (await this.getPlan(id)) || null : null;
   }
 
   async getPlan(planId) {
@@ -94,6 +88,9 @@ export class FirestoreRepo {
         edgeCount: p.edges.length,
         hasImage: withImage.has(p.id),
         active: p.id === activeId,
+        // 앱에서 올라온 초안인지. 편집기가 "확인 필요"로 표시하고, 활성화는 막힌다.
+        draft: Boolean(p.draft),
+        readConfidence: p.readConfidence || null,
         updatedAt: p.updatedAt,
       };
     });
@@ -186,7 +183,7 @@ export class FirestoreRepo {
     const snap = await this.db.collection('hazards').get();
     snap.forEach(d => batch.delete(d.ref));
     const plan = await this.getActivePlan();
-    for (const [edgeId, h] of Object.entries(plan.initialHazards || {})) {
+    for (const [edgeId, h] of Object.entries(plan?.initialHazards || {})) {
       batch.set(this.db.collection('hazards').doc(edgeId),
         { ...h, active: true, updatedAt: Date.now() });
     }

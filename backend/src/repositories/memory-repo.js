@@ -1,12 +1,38 @@
-import { DEFAULT_PLAN } from '../../../shared/default-plan.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { publish } from '../events.js';
 import { generateCode, normalizeCode } from '../guardian-code.js';
 
 /**
- * 인메모리 저장소 — Firebase 없이 시연할 때 쓰는 데모 모드.
+ * 로컬 저장소 — Firebase 없이 쓰는 기본 모드.
  * FirestoreRepo와 동일한 인터페이스를 구현하므로 라우터는 둘을 구분하지 않는다.
- * (프로세스 재시작 시 초기화됨)
+ *
+ * ## 예제 도면을 심지 않는다
+ *
+ * 예전에는 켜질 때마다 시연용 "병원 3층"을 심고 활성화했다. 그래서 실제 건물을
+ * 등록해도 서버를 재시작하면 **병원으로 되돌아갔다.** 데모에는 편했지만 실제
+ * 건물을 넣는 순간부터는 거짓말이 된다 — 앱이 있지도 않은 병원 복도를 안내한다.
+ *
+ * 이제 **빈 상태로 시작한다.** 도면이 없으면 안내를 하지 않고 그렇게 말한다.
+ *
+ * ## 도면은 파일로 남긴다
+ *
+ * 도면을 등록하려면 사람이 그 건물까지 가서 사진을 찍어야 한다. 서버를 껐다 켰다고
+ * 그게 사라지면 다시 가야 한다. Firebase 없이도 살아남도록 JSON 파일에 적어둔다.
+ * (위험 상태·구조요청 같은 화재 중 데이터는 일부러 안 남긴다 — 다음에 켤 때
+ * 지난 화재가 되살아나면 안 된다.)
  */
+/**
+ * 저장 위치. 테스트는 `FIRE_DATA_DIR` 로 임시 폴더를 가리켜서
+ * **운영 데이터를 건드리지 않는다** — 테스트가 심은 시연 도면이 실제 서버에
+ * 남아 "병원 3층"으로 되돌아가는 일이 실제로 있었다.
+ */
+const DATA_DIR = process.env.FIRE_DATA_DIR || path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)), '../../data',
+);
+const PLANS_FILE = path.join(DATA_DIR, 'plans.json');
 export class MemoryRepo {
   constructor() {
     this.mode = 'memory';
@@ -23,14 +49,42 @@ export class MemoryRepo {
   }
 
   async init() {
-    await this.savePlan(DEFAULT_PLAN);
-    this.activePlanId = DEFAULT_PLAN.id;
+    this._load();
     await this.resetHazards();
   }
 
+  // ------------------------------------------------------------------ 파일 보존
+  _load() {
+    try {
+      const raw = JSON.parse(fs.readFileSync(PLANS_FILE, 'utf8'));
+      for (const p of raw.plans || []) this.plans.set(p.id, p);
+      for (const [id, uri] of Object.entries(raw.images || {})) this.planImages.set(id, uri);
+      this.activePlanId = raw.activePlanId || null;
+      console.log(`[repo] 도면 ${this.plans.size}개 불러옴${this.activePlanId ? ` (사용 중: ${this.activePlanId})` : ''}`);
+    } catch (_) {
+      // 파일이 없으면 빈 상태로 시작한다. 예제 도면을 심지 않는다.
+    }
+  }
+
+  _persist() {
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(PLANS_FILE, JSON.stringify({
+        plans: [...this.plans.values()],
+        images: Object.fromEntries(this.planImages),
+        activePlanId: this.activePlanId,
+      }));
+    } catch (err) {
+      // 저장에 실패해도 서비스는 계속돼야 한다. 다만 조용히 넘어가면
+      // 재시작 후 도면이 사라진 이유를 아무도 모른다.
+      console.error('[repo] 도면 저장 실패:', err.message);
+    }
+  }
+
   // ------------------------------------------------------------------ plans
+  /** 활성 도면. **없으면 null** — 없는데 있는 척하면 엉뚱한 건물을 안내한다. */
   async getActivePlan() {
-    return this.plans.get(this.activePlanId) || DEFAULT_PLAN;
+    return this.plans.get(this.activePlanId) || null;
   }
 
   async listPlans() {
@@ -41,6 +95,9 @@ export class MemoryRepo {
       edgeCount: p.edges.length,
       hasImage: this.planImages.has(p.id),
       active: p.id === this.activePlanId,
+      // 앱에서 올라온 초안인지. 편집기가 "확인 필요"로 표시하고, 활성화는 막힌다.
+      draft: Boolean(p.draft),
+      readConfidence: p.readConfidence || null,
       updatedAt: p.updatedAt,
     }));
   }
@@ -52,6 +109,7 @@ export class MemoryRepo {
   async savePlan(plan) {
     const doc = { ...plan, updatedAt: Date.now() };
     this.plans.set(plan.id, doc);
+    this._persist();
     publish('plan', await this.getActivePlan());
     return doc;
   }
@@ -59,11 +117,13 @@ export class MemoryRepo {
   async deletePlan(planId) {
     this.plans.delete(planId);
     this.planImages.delete(planId);
+    this._persist();
   }
 
   async activatePlan(planId) {
     if (!this.plans.has(planId)) return null;
     this.activePlanId = planId;
+    this._persist();
     // 도면이 바뀌면 이전 도면의 통로 ID로 걸려 있던 위험은 의미가 없다
     await this.resetHazards();
     this.sensors.clear();
@@ -78,6 +138,7 @@ export class MemoryRepo {
 
   async setPlanImage(planId, dataUri) {
     this.planImages.set(planId, dataUri);
+    this._persist();
   }
 
   // ---------------------------------------------------------------- hazards
@@ -98,7 +159,7 @@ export class MemoryRepo {
   async resetHazards() {
     this.hazards = {};
     const plan = await this.getActivePlan();
-    for (const [edgeId, h] of Object.entries(plan.initialHazards || {})) {
+    for (const [edgeId, h] of Object.entries(plan?.initialHazards || {})) {
       this.hazards[edgeId] = { ...h, active: true, updatedAt: Date.now() };
     }
     publish('hazards', await this.getHazards());

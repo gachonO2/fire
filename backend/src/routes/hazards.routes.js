@@ -28,6 +28,8 @@ hazardRoutes.put('/hazards/:edgeId', requireAdmin, async (req, res) => {
   const { type, label } = req.body || {};
 
   const floorPlan = await activeFloorPlan();
+
+  if (!floorPlan) return res.status(404).json({ error: '등록된 도면이 없습니다. 먼저 피난안내도를 등록하고 활성화해주세요.' });
   if (!floorPlan.hasEdge(edgeId)) return res.status(404).json({ error: `알 수 없는 통로: ${edgeId}` });
   if (!VALID_TYPES.includes(type)) {
     return res.status(400).json({ error: `type은 ${VALID_TYPES.join(', ')} 중 하나여야 합니다.` });
@@ -41,6 +43,7 @@ hazardRoutes.put('/hazards/:edgeId', requireAdmin, async (req, res) => {
 hazardRoutes.delete('/hazards/:edgeId', requireAdmin, async (req, res) => {
   const { edgeId } = req.params;
   const floorPlan = await activeFloorPlan();
+  if (!floorPlan) return res.status(404).json({ error: '등록된 도면이 없습니다. 먼저 피난안내도를 등록하고 활성화해주세요.' });
   if (!floorPlan.hasEdge(edgeId)) return res.status(404).json({ error: `알 수 없는 통로: ${edgeId}` });
 
   const repo = await getRepo();
@@ -67,6 +70,7 @@ hazardRoutes.post('/hazards/reset', requireAdmin, async (req, res) => {
 hazardRoutes.post('/sensors/fire-panel', async (req, res) => {
   const { sensorId, edgeId, type = 'smoke', active = true } = req.body || {};
   const floorPlan = await activeFloorPlan();
+  if (!floorPlan) return res.status(404).json({ error: '등록된 도면이 없습니다. 먼저 피난안내도를 등록하고 활성화해주세요.' });
   if (!floorPlan.hasEdge(edgeId)) return res.status(404).json({ error: `알 수 없는 통로: ${edgeId}` });
 
   const repo = await getRepo();

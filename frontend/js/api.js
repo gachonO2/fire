@@ -11,7 +11,17 @@
 
 import { routeToNearestExit } from '../shared/pathfinding.js';
 import { FloorPlan } from '../shared/floor-plan.js';
-import { DEFAULT_PLAN } from '../shared/default-plan.js';
+/**
+ * 도면이 없을 때 쓰는 **빈 도면**.
+ *
+ * 예전에는 시연용 "병원 3층"으로 채웠다. 그래서 실제 건물을 등록하기 전까지
+ * 앱이 있지도 않은 병원 복도를 자신 있게 안내했다. 빈 도면이면 출구도 시작
+ * 위치도 없으니, 화면이 "등록된 도면이 없습니다"로 정직하게 막힌다.
+ */
+const EMPTY_PLAN = {
+  id: '', name: '', metersPerUnit: 1, stepLength: 0.7,
+  image: null, nodes: [], edges: [], initialHazards: {},
+};
 
 // 같은 출처에서 서빙되면 상대경로, 아니면 ?api=http://... 로 지정 가능
 const BASE = new URLSearchParams(location.search).get('api') || '';
@@ -33,9 +43,14 @@ export class Api {
     this._es = null;
 
     // 통신이 끊겨도 안내를 이어가려면 도면이 손에 있어야 한다.
-    // 마지막으로 받은 도면 → 없으면 번들된 기본 도면 순으로 사용한다.
-    this.floorPlan = new FloorPlan(this._loadPlanCache() || DEFAULT_PLAN);
+    // 마지막으로 받은 도면 → 없으면 빈 도면. 예제 건물로 채우지 않는다.
+    this.floorPlan = new FloorPlan(this._loadPlanCache() || EMPTY_PLAN);
     this.backgroundImage = null;
+  }
+
+  /** 안내에 쓸 수 있는 도면이 있는가 (출구가 하나라도 있어야 한다) */
+  get hasPlan() {
+    return this.floorPlan.nodes.length > 0 && this.floorPlan.exitNodes().length > 0;
   }
 
   /** 서버의 활성 도면을 받아온다. 실패하면 캐시된 도면을 유지한다. */
@@ -201,6 +216,16 @@ export class Api {
 
   getPlanImage(planId) {
     return this._fetch(`/api/plans/${encodeURIComponent(planId)}/image`);
+  }
+
+  /** AI 판독을 쓸 수 있는지 (서버에 키가 설정돼 있는지) */
+  readerAvailable() { return this._fetch('/api/plans/reader'); }
+
+  /** 도면 사진 → 경로 그래프 초안. 저장하지 않는다 — 사람이 검수한 뒤 savePlan 한다. */
+  readPlanImage({ dataUri, width, height }) {
+    return this._fetch('/api/plans/read', {
+      method: 'POST', body: JSON.stringify({ dataUri, width, height }),
+    });
   }
 
   savePlanImage(planId, dataUri) {

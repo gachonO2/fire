@@ -8,6 +8,8 @@ export const evacuationRoutes = Router();
 /** 현재 활성 도면 — 프론트도 오프라인용 사본을 갖지만, 여기가 단일 진실 소스다. */
 evacuationRoutes.get('/map', async (req, res) => {
   const floorPlan = await activeFloorPlan();
+  // 도면이 없으면 404. 빈 도면을 주면 앱이 "안내 가능"으로 착각한다.
+  if (!floorPlan) return res.status(404).json({ error: '등록된 도면이 없습니다. 먼저 피난안내도를 등록하고 활성화해주세요.' });
   res.json(floorPlan.toJSON());
 });
 
@@ -23,6 +25,7 @@ evacuationRoutes.post('/route', async (req, res) => {
   const { from, kind = 'initial', userId } = req.body || {};
 
   const floorPlan = await activeFloorPlan();
+  if (!floorPlan) return res.status(404).json({ error: '등록된 도면이 없습니다. 먼저 피난안내도를 등록하고 활성화해주세요.' });
   if (!floorPlan.hasNode(from)) {
     return res.status(400).json({ error: `알 수 없는 시작 노드: ${from}` });
   }

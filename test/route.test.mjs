@@ -1,7 +1,7 @@
 // 경로탐색 시나리오: 도면 기반 그래프 + 위험 회피 + 온도 센서 반영
 import { routeToNearestExit } from '../shared/pathfinding.js';
 import { FloorPlan, validatePlan, findUnreachableNodes } from '../shared/floor-plan.js';
-import { DEFAULT_PLAN } from '../shared/default-plan.js';
+import { DEMO_PLAN as DEFAULT_PLAN } from '../backend/test/fixtures/demo-plan.js';
 import { hazardsFromSensors, mergeHazards, TEMP } from '../shared/hazard-rules.js';
 
 let failed = 0;

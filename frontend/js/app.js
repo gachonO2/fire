@@ -11,6 +11,7 @@
 
 import { Guidance } from './guidance.js';
 import { Odometry } from './odometry.js';
+import { CompassGuide } from './compass-guide.js';
 import { Api } from './api.js';
 import { renderMap, positionOnRoute } from './minimap.js';
 
@@ -64,6 +65,23 @@ async function main() {
   };
 
   state.odometry.onStep = () => { if (state.phase === 'guiding') onStep(); };
+
+  // 방향 확인(나의 찾기식): 누르고 있는 동안만 방향 신호를 낸다.
+  // 방위 오차는 걸음 안내와 같은 값을 쓰고, 근접도는 현재 구간의 진행률을 쓴다.
+  state.compass = new CompassGuide(
+    () => {
+      const expected = currentBearing();
+      return expected === null ? null : state.odometry.headingError(expected);
+    },
+    () => {
+      const edge = currentEdge();
+      if (!edge) return 1;                       // 출구 도착 직전
+      const total = edgeSteps(edge);
+      return total ? Math.min(1, state.stepsTaken / total) : 0;
+    },
+  );
+  state.compass.onState = text => { $('scan-state').textContent = text; };
+  bindScanButton();
   state.odometry.start();
 
   // 시작 위치 목록은 도면에서 나온다 — 도면을 먼저 받아온 뒤 화면을 만든다
@@ -169,6 +187,10 @@ async function copyGuardianLink() {
 function buildStartPicker() {
   const wrap = $('start-picker');
   wrap.innerHTML = '';
+  if (!state.api.hasPlan) {
+    wrap.innerHTML = '<p class="hint">등록된 도면이 없습니다. 도면 편집기에서 피난안내도를 등록하고 활성화해주세요.</p>';
+    return;
+  }
   for (const node of plan().nodes) {
     if (node.type === 'exit' || node.type === 'elevator') continue;
     const btn = document.createElement('button');
@@ -480,3 +502,43 @@ function reportPosition() {
 }
 
 main();
+
+
+/**
+ * 방향 확인 버튼 — **누르고 있는 동안만** 동작한다.
+ *
+ * 계속 소리를 내면 화재경보·사람 목소리를 덮는다. 시각장애인에게 주변 소리는
+ * 시야에 해당하므로, 필요할 때만 켜고 손을 떼면 바로 꺼지는 편이 안전하다.
+ *
+ * iOS 는 오디오를 **사용자 제스처 안에서** 시작해야 소리가 난다. 그래서
+ * pointerdown 시점에 AudioContext 를 깨운다(CompassGuide.start 안에서 처리).
+ */
+function bindScanButton() {
+  const btn = $('btn-scan');
+  if (!btn) return;
+
+  const begin = e => {
+    e.preventDefault();
+    if (state.phase !== 'guiding') return;
+    const ok = state.compass.start();
+    btn.dataset.active = ok ? 'true' : 'false';
+    if (!ok) $('scan-state').textContent = '방향 센서를 쓸 수 없습니다 (데스크톱)';
+  };
+  const end = () => {
+    state.compass.stop();
+    btn.dataset.active = 'false';
+    $('scan-state').textContent = '';
+  };
+
+  btn.addEventListener('pointerdown', begin);
+  btn.addEventListener('pointerup', end);
+  btn.addEventListener('pointercancel', end);
+  btn.addEventListener('pointerleave', end);
+  // 키보드·스크린리더 사용자를 위해 스페이스/엔터로도 토글되게
+  btn.addEventListener('keydown', e => {
+    if ((e.key === ' ' || e.key === 'Enter') && !state.compass.active) begin(e);
+  });
+  btn.addEventListener('keyup', e => {
+    if (e.key === ' ' || e.key === 'Enter') end();
+  });
+}

@@ -49,6 +49,26 @@
         <label for="floor-width">이 층의 실제 가로 폭 (m)</label>
         <input id="floor-width" type="number" min="1" step="0.5" value="40" />
         <p class="hint" id="scale-info">축척을 정확히 넣어야 걸음 수 안내가 맞습니다.</p>
+
+        <label for="north-offset">도면 위쪽이 향하는 실제 방위 (0=북, 90=동, 180=남, 270=서)</label>
+        <input id="north-offset" type="number" min="0" max="359" step="1" placeholder="비워두면 진동 안내 꺼짐" />
+        <p class="hint">
+          도면은 종이에 아무 방향으로나 그려집니다. <strong>이 값이 없으면
+          "폰을 이쪽으로 돌리세요" 안내를 못 합니다</strong>(좌우 회전 안내는 그대로 됩니다).
+          도면에 방위표(N 화살표)가 있으면 그걸 보고, 없으면 현장에서 나침반 앱으로
+          복도 방향을 재서 넣으세요.
+        </p>
+
+        <!-- 판독은 사람이 클릭하던 일을 대신할 뿐, 검수를 대신하지는 않는다.
+             그래서 버튼 문구도 "읽어오기"이지 "자동 생성"이 아니다. -->
+        <div id="ai-read-box" hidden style="margin-top:14px;border-top:1px solid #e5e7eb;padding-top:14px">
+          <button id="ai-read" type="button">✨ 도면에서 자동으로 읽어오기</button>
+          <p class="hint">
+            비상구·현 위치·피난경로를 찾아 지점과 통로를 대신 찍어줍니다.
+            <strong>읽어온 뒤 반드시 확인하세요</strong> — 틀린 채로 저장하면 오안내가 됩니다.
+          </p>
+          <p class="hint" id="ai-read-status"></p>
+        </div>
       </section>
 
       <section class="panel" style="margin-bottom:16px">

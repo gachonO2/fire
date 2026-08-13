@@ -70,6 +70,14 @@
       <div class="kpi wide"><span class="kpi-label">상태</span><strong id="kpi-status">대피 중</strong></div>
     </section>
 
+    <button id="btn-scan" class="big-btn scan"
+            aria-describedby="scan-help">🧭 방향 확인 — 누른 채로 폰을 돌리세요</button>
+    <p id="scan-help" class="scan-help">
+      누르고 있는 동안만 신호가 납니다. 맞는 방향일수록 소리가 빨라지고
+      가까울수록 커집니다. 손을 떼면 조용해집니다.
+    </p>
+    <p id="scan-state" class="scan-state" aria-live="polite"></p>
+
     <div class="actions">
       <button id="btn-repeat" class="big-btn secondary">🔊 다시 듣기</button>
       <button id="btn-sos" class="big-btn danger">🆘 구조요청</button>
