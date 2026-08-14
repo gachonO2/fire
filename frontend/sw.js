@@ -5,7 +5,7 @@
  * /api/* 는 절대 캐시하지 않는다 — 오래된 위험 정보로 안내하면 안 되기 때문.
  * 서버에 닿지 못하면 api.js가 오프라인 폴백으로 전환하고 사용자에게 그 사실을 알린다.
  */
-const CACHE = 'fireguide-v5';
+const CACHE = 'fireguide-v6';
 const SHELL = [
   './',
   './index.html',
@@ -18,21 +18,29 @@ const SHELL = [
   './js/app.js',
   './js/admin.js',
   './js/architect.js',
+  './js/beacon.js',
+  './js/compass-guide.js',
   './js/demo.js',
   './js/guardian.js',
   './js/guidance.js',
   './js/minimap.js',
   './js/odometry.js',
+  './shared/beacon-sim.js',
   './shared/floor-plan.js',
-  './shared/default-plan.js',
   './shared/hazard-rules.js',
   './shared/pathfinding.js',
+  './shared/positioning.js',
   './manifest.json',
   './icon.svg',
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)));
+  // 한 파일이라도 404면 addAll 은 **전부** 실패한다 — 그러면 캐시가 통째로 비고
+  // 오프라인 안내가 조용히 죽는다. 목록에서 사라진 파일 하나 때문에 그러지 않도록
+  // 개별로 담고, 실패한 것만 건너뛴다.
+  e.waitUntil(caches.open(CACHE).then(c =>
+    Promise.all(SHELL.map(url => c.add(url).catch(err =>
+      console.warn('[sw] 캐시 실패(건너뜀):', url, err.message))))));
   self.skipWaiting();
 });
 

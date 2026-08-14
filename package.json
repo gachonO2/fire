@@ -10,7 +10,7 @@
     "dev:backend": "node --watch backend/src/server.js",
     "sync": "node scripts/sync-shared.mjs",
     "start": "npm run sync && node backend/src/server.js",
-    "test": "npm run sync && node test/route.test.mjs && node backend/test/api.test.mjs"
+    "test": "npm run sync && node test/route.test.mjs && node test/positioning.test.mjs && node backend/test/api.test.mjs"
   },
   "engines": {
     "node": ">=20"

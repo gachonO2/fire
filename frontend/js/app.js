@@ -12,6 +12,7 @@
 import { Guidance } from './guidance.js';
 import { Odometry } from './odometry.js';
 import { CompassGuide } from './compass-guide.js';
+import { BeaconSense } from './beacon.js';
 import { Api } from './api.js';
 import { renderMap, positionOnRoute } from './minimap.js';
 
@@ -53,6 +54,9 @@ const state = {
   stepsTaken: 0,
   deviationStreak: 0,
   autoWalkTimer: null,
+
+  beaconNodeId: null,   // 비콘이 판정한 현재 지점
+  standNodeId: null,    // 시뮬레이션에서 "실제로 서 있는" 지점 (대피 전)
 };
 
 // ------------------------------------------------------------------ 초기화
@@ -87,10 +91,12 @@ async function main() {
   // 시작 위치 목록은 도면에서 나온다 — 도면을 먼저 받아온 뒤 화면을 만든다
   await state.api.loadFloorPlan();
   buildStartPicker();
+  startBeacons();
 
   // 관제에서 다른 건물 도면을 활성화하면 대기 중인 앱도 따라간다
   state.api.on('plan', () => {
-    if (state.phase === 'idle') buildStartPicker();
+    if (state.phase === 'idle') { buildStartPicker(); startBeacons(); }
+    else state.beacon?.refreshPlan();
     drawMap();
   });
 
@@ -196,16 +202,103 @@ function buildStartPicker() {
     const btn = document.createElement('button');
     btn.className = 'pick-btn';
     btn.textContent = node.name;
+    btn.dataset.nodeId = node.id;
     btn.setAttribute('aria-pressed', 'false');
     btn.addEventListener('click', () => {
       state.startNodeId = node.id;
-      wrap.querySelectorAll('.pick-btn').forEach(b => b.setAttribute('aria-pressed', 'false'));
-      btn.setAttribute('aria-pressed', 'true');
+      // 손으로 고른 위치는 시뮬레이션의 정답값도 함께 옮긴다 — 그래야 비콘이
+      // 그 자리에서 신호를 만들고, 데모에서 다른 방을 골라볼 수 있다.
+      state.standNodeId = node.id;
+      state.beacon?.start();
+      markPicked(node.id);
       $('btn-start').disabled = false;
       state.guidance.speak(`시작 위치: ${node.name}. 대피 시작 버튼을 누르세요.`);
     });
     wrap.appendChild(btn);
   }
+}
+
+// ------------------------------------------------------------- 비콘 측위
+/**
+ * 비콘으로 현재 위치를 스스로 찾는다.
+ *
+ * **이 기능의 목적은 "현재 위치를 묻지 않는 것"이다.** 목록에서 자기 방 이름을
+ * 찾는 일은 눈으로는 1초지만 스크린리더로는 수십 번의 탭이고, 화재 상황에서
+ * 그 시간을 쓰게 해서는 안 된다. 목록·QR은 비콘이 없는 건물을 위한 폴백으로 남는다.
+ */
+function startBeacons() {
+  state.beacon?.stop();
+  state.beacon = new BeaconSense(plan, trueDemoPosition);
+  state.beacon.onLocate = onBeaconLocate;
+
+  if (!state.beacon.start()) {
+    setBeaconStatus('등록된 도면이 없어 위치를 찾을 수 없습니다. 도면을 먼저 등록해주세요.');
+    return;
+  }
+  // 대피 전 "실제로 서 있는 곳" — 시뮬레이션의 정답값이다. 앱은 이 값을 보지 않고
+  // 비콘 신호(RSSI)만 보고 위치를 맞힌다.
+  state.standNodeId ||= (plan().nodes.find(n => n.type === 'room') || plan().nodes[0])?.id;
+  setBeaconStatus('📡 비콘 신호를 확인하는 중입니다…');
+}
+
+/**
+ * 시뮬레이션이 신호를 만들 기준 좌표(= 사용자가 실제로 있는 곳).
+ * 안내 중에는 걸음으로 움직이는 경로상 위치, 대피 전에는 서 있는 지점이다.
+ */
+function trueDemoPosition() {
+  // 경로가 잡힌 뒤로는(안내 중·도착·안전상태) 경로상 위치가 곧 실제 위치다.
+  // 도착했다고 서 있던 방으로 되돌리면 비콘이 출구가 아닌 방을 가리킨다.
+  const onRoute = myPosition();
+  if (onRoute) return onRoute;
+  const node = getNode(state.standNodeId);
+  return node ? { x: node.x, y: node.y } : null;
+}
+
+function onBeaconLocate(nodeId, { locked, node }) {
+  state.beaconNodeId = nodeId;
+  if (!node) return;
+
+  if (state.phase === 'idle') {
+    // 확정 전(locked=false)에는 알리지 않는다. 첫 몇 초의 잠정값은 흔들릴 수
+    // 있는데, 그때마다 음성이 나가면 "여기다 저기다" 하는 꼴이 된다.
+    if (!locked) return;
+    state.startNodeId = nodeId;
+    $('btn-start').disabled = false;
+    markPicked(nodeId);
+    setBeaconStatus(
+      `📡 현재 위치: ${node.name}${state.beacon.virtual ? ' (가상 비콘 시뮬레이션)' : ''}`, true);
+    state.guidance.speak(`현재 위치는 ${node.name} 입니다. 대피 시작 버튼을 누르세요.`);
+    return;
+  }
+
+  // 도착·안전상태에서도 계속 표시한다. 구조대와 보호자에게는 "어디서 멈췄는가"가
+  // 안내 문구보다 중요한 정보다.
+  $('kpi-beacon').textContent = node.name;
+
+  if (state.phase === 'guiding') {
+    // 경로에 없는 지점에서 신호가 잡히면 실제로 벗어난 것이다.
+    // 나침반 이탈 감지보다 확실한 신호라 그대로 이탈로 처리한다.
+    if (state.route && !state.route.nodes.includes(nodeId)) {
+      state.guidance.cmdStop(`경로를 벗어났습니다. ${node.name} 부근입니다.`);
+      const conf = state.odometry.degradeConfidence(0.2);
+      updateHud();
+      if (conf < CONFIDENCE_FLOOR) enterSafeHold('비콘 위치가 경로를 벗어났습니다.');
+    }
+  }
+}
+
+function setBeaconStatus(text, found = false) {
+  const el = $('beacon-status');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('found', found);
+}
+
+/** 목록 버튼의 선택 표시를 비콘 판정과 맞춘다 (스크린리더가 상태를 읽을 수 있게) */
+function markPicked(nodeId) {
+  const wrap = $('start-picker');
+  wrap.querySelectorAll('.pick-btn').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.nodeId === nodeId)));
 }
 
 /** QR 내용 = 노드 ID (예: "N1"). 지원 브라우저에서만 동작, 아니면 수동 선택 안내 */
@@ -229,6 +322,9 @@ async function scanQR() {
         stream.getTracks().forEach(t => t.stop());
         video.hidden = true;
         state.startNodeId = hit.rawValue;
+        state.standNodeId = hit.rawValue;
+        state.beacon?.start();
+        markPicked(hit.rawValue);
         $('btn-start').disabled = false;
         state.guidance.speak(`위치 확인: ${getNode(hit.rawValue).name}. 대피 시작 버튼을 누르세요.`);
       }
@@ -249,6 +345,10 @@ async function startEvacuation() {
   state.phase = 'guiding';
   $('screen-start').hidden = true;
   $('screen-guide').hidden = false;
+
+  // 대기 화면에서 이미 확정한 지점을 그대로 표시한다. onLocate 는 판정이 **바뀔 때만**
+  // 오므로, 여기서 채우지 않으면 첫 구간 내내 빈칸으로 남는다.
+  $('kpi-beacon').textContent = getNode(state.beaconNodeId)?.name || '-';
 
   state.guidance.cmdStart(route.exit.name);
   setTimeout(() => announceSegment(true), 2200); // 시작 안내가 끝날 즈음 첫 이동 명령

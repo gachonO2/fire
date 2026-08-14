@@ -56,6 +56,20 @@ h3 { font-size: 1.05rem; margin: 18px 0 8px; color: var(--text-dim); }
 
 .hint { color: var(--text-dim); font-size: 0.9rem; margin-bottom: 14px; }
 
+/* 비콘이 찾아낸 현재 위치 — 시작 화면에서 사용자가 가장 먼저 확인하는 정보라
+   본문보다 크게 두고, 확정되면 경로 색으로 바꿔 "찾았다"를 색으로도 알린다. */
+.beacon-status {
+  font-size: 1.15rem;
+  line-height: 1.5;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  border-radius: 12px;
+  background: #12202b;
+  border: 2px solid #24384a;
+  color: var(--text-dim);
+}
+.beacon-status.found { color: var(--route); border-color: var(--route); }
+
 /* 버튼 */
 .big-btn {
   display: block;
