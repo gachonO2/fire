@@ -70,13 +70,18 @@ const det = (className, x1, y1, x2, y2, confidence = 0.9) =>
 
 {
   const { warnings } = nodesFromDetections([det('room', 0.2, 0.1, 0.35, 0.3)]);
-  expect('출구를 못 찾으면 경고한다',
-    warnings.some(w => w.includes('비상구') && w.includes('찾지 못')));
   expect('번호 이름은 바꾸라고 알린다',
     warnings.some(w => w.includes('실제 호실 이름')));
 
-  const { warnings: w2 } = nodesFromDetections([det('exit', 0.9, 0.45, 0.96, 0.55)]);
-  expect('실을 못 찾으면 경고한다', w2.some(w => w.includes('실(방)')));
+  const { warnings: w2 } = nodesFromDetections([det('stair', 0.04, 0.45, 0.10, 0.55)]);
+  expect('계단을 출구로 올렸다고 알린다',
+    w2.some(w => w.includes('계단') && w.includes('출구로 표시')));
+
+  // "출구가 없다"·"방이 없다"는 planReader.js 의 sanitize 가 말한다.
+  // 여기서도 말하면 표현만 다른 같은 경고가 두 줄 뜬다.
+  expect('출구·방 없음 경고는 여기서 내지 않는다',
+    !warnings.some(w => w.includes('찾지 못')) && !w2.some(w => w.includes('찾지 못')),
+    [...warnings, ...w2].filter(w => w.includes('찾지 못')).join(' / '));
 }
 
 // ─────────────────────────────────────────────── 선분–사각형 교차

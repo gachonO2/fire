@@ -409,8 +409,11 @@ export async function readPlanFromImage(dataUri, size = {}) {
   return await readWithDetector(detected, parsed, size, hasReader);
 }
 
-/** 예전 경로 — 탐지기 없이 언어모델이 좌표까지 전부 읽는다 */
-async function readWithModelOnly(parsed, size) {
+/**
+ * 예전 경로 — 탐지기 없이 언어모델이 좌표까지 전부 읽는다.
+ * @param why  왜 탐지기 없이 읽는지. 사람이 검수 방식을 정하는 데 쓰는 정보다.
+ */
+async function readWithModelOnly(parsed, size, why = '기호 탐지기가 꺼져 있어') {
   // 그림이 모델에 닿지 않으면 판독을 **시작하지 않는다.**
   // 못 본 채로 지어낸 도면이 돌아오면 사람이 알아채기 어렵다 — 그럴듯하기 때문이다.
   const vision = await checkVision();
@@ -430,7 +433,7 @@ async function readWithModelOnly(parsed, size) {
 
   const out = sanitize(draft, size);
   out.engine = `언어모델 단독 (${providerLabel()})`;
-  out.warnings.unshift('기호 탐지기가 꺼져 있어 좌표까지 언어모델이 읽었습니다. 지점 위치가 실제와 어긋날 수 있으니 특히 꼼꼼히 확인하세요.');
+  out.warnings.unshift(`${why} 좌표까지 언어모델이 읽었습니다. 지점 위치가 실제와 어긋날 수 있으니 특히 꼼꼼히 확인하세요.`);
   return out;
 }
 
@@ -445,6 +448,14 @@ async function readWithDetector(detected, parsed, size, hasReader) {
   const { nodes, roomBoxes, warnings } = nodesFromDetections(detected.detections);
 
   if (!nodes.length) {
+    // 탐지기가 이 사진에서 아무것도 못 찾았다. 도면이 아니어서일 수도 있지만,
+    // 학습 데이터에 없던 양식이어서일 수도 있다. 언어모델이 붙어 있으면
+    // 그쪽에 한 번 맡겨 본다 — 여기서 끝내면 사람이 사진을 다시 찍으러 간다.
+    if (hasReader) {
+      return await readWithModelOnly(parsed, size, detected.rawCount
+        ? `탐지기가 기호 ${detected.rawCount}개를 찾았지만 확신이 낮아 모두 걸러서,`
+        : '탐지기가 이 사진에서 기호를 찾지 못해');
+    }
     throw Object.assign(
       new Error(
         detected.rawCount
@@ -489,7 +500,10 @@ async function readWithDetector(detected, parsed, size, hasReader) {
           return out;
         }
       } catch (err) {
-        // 언어모델이 실패해도 탐지 결과로 계속 간다. 사람은 통로만 그리면 된다.
+        // "피난안내도가 아니다"는 실패가 아니라 **판정**이다. 여기서 삼키면
+        // 엉뚱한 사진에서 나온 상자로 도면을 만들어 저장까지 가게 된다.
+        if (err.status === 422) throw err;
+        // 그 밖의 실패(붐빔·형식 오류)는 탐지 결과로 계속 간다. 사람은 통로만 그리면 된다.
         warnings.push(`이름·통로를 언어모델에 맡기려 했으나 실패했습니다 (${err.message}). 탐지된 지점만 담았습니다.`);
       }
     } else {

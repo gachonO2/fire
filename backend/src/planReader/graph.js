@@ -93,12 +93,9 @@ export function nodesFromDetections(detections) {
   if (stairs.length) {
     warnings.push(`계단 ${stairs.length}곳을 출구로 표시했습니다. 대피에 쓸 수 없는 계단(옥상 전용 등)이면 유형을 바꿔주세요.`);
   }
-  if (!nodes.some(n => n.type === 'exit')) {
-    warnings.push('비상구·계단을 하나도 찾지 못했습니다. 대피 목표가 없으면 안내를 시작할 수 없으니 직접 표시해주세요.');
-  }
-  if (!nodes.some(n => n.type === 'room')) {
-    warnings.push('실(방)을 하나도 찾지 못했습니다. 대피 시작 위치를 고를 목록이 비게 되니 직접 넣어주세요.');
-  }
+  // "출구가 없다"·"방이 없다"는 여기서 말하지 않는다 — planReader.js 의 sanitize 가
+  // 어느 엔진으로 읽었든 똑같이 검사한다. 양쪽에서 말하면 표현만 다른 같은 경고가
+  // 두 줄 뜨고, 목록이 길어지면 진짜 문제가 묻힌다.
   if (nodes.some(n => n.type === 'room')) {
     warnings.push('장소 이름은 번호로만 붙였습니다(실 1, 실 2…). 탐지기는 글자를 읽지 못하므로, 도면에 적힌 실제 호실 이름으로 바꿔주세요 — 시각장애인이 대피를 시작할 때 이 이름 목록에서 고릅니다.');
   }
