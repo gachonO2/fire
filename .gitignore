@@ -7,3 +7,14 @@ frontend/shared/
 
 # 참고용으로 클론한 오픈소스 원본
 vendor/
+
+# 모델 학습 산출물 — 가중치는 무거워서 저장소에 두지 않는다.
+# ml/dataset/ 은 학습 데이터라서 일부러 추적한다 (시드로 재생성도 가능).
+ml/runs/
+ml/**/__pycache__/
+ml/*.pt
+ml/*.onnx
+ml/data_colab.yaml
+
+# 코랩 업로드용으로 묶은 임시 꾸러미
+ml-colab.zip
