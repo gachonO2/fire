@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+pydantic
+ultralytics
+opencv-python-headless
+torch

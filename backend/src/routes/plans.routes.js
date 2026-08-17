@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { validatePlan, FloorPlan, findUnreachableNodes } from '../../../shared/floor-plan.js';
 import { getRepo } from '../repositories/index.js';
 import { requireAdmin } from '../middleware/auth.js';
-import { readPlanFromImage, readerAvailable, checkVision } from '../planReader.js';
+import { readPlanFromImage, readerStatus } from '../planReader.js';
 
 export const planRoutes = Router();
 
@@ -27,19 +27,10 @@ planRoutes.get('/plans', async (req, res) => {
  * 이름의 도면을 찾다가 404 가 난다.
  */
 planRoutes.get('/plans/reader', async (req, res) => {
-  if (!readerAvailable()) {
-    return res.json({ configured: false, available: false, reason: '판독 키가 설정되지 않았습니다.' });
-  }
-  // 키가 있어도 그림이 모델에 닿는지는 별개다. 닿지 않으면 판독기는 도면을 지어낸다.
-  // configured 와 available 을 나눠 두어야 편집기가 "키 없음"과 "키는 있는데 눈이 없음"을
-  // 다르게 보여줄 수 있다 — 후자는 사용자가 고칠 수 있는 문제다.
-  const vision = await checkVision();
-  // transient=true 는 "지금 붐빔"이지 "못 쓴다"가 아니다. 편집기가 버튼을 잠그되
-  // 다시 눌러볼 수 있게 구분해서 알린다.
-  res.json({
-    configured: true, available: vision.ok,
-    retryable: Boolean(vision.transient), reason: vision.reason,
-  });
+  // 엔진이 둘(기호 탐지기 · 언어모델)이라 어느 쪽이 살아 있는지까지 알려준다.
+  // 편집기가 "키 없음"·"키는 있는데 눈이 없음"·"탐지기만 있음"을 다르게 보여줘야
+  // 사용자가 무엇을 고쳐야 하는지 알 수 있다.
+  res.json(await readerStatus());
 });
 
 planRoutes.get('/plans/:planId', async (req, res) => {
@@ -216,6 +207,9 @@ planRoutes.post('/plans/draft', async (req, res, next) => {
       // 확인 전이라는 표시. 이게 붙어 있으면 활성화되지 않는다.
       draft: true,
       readConfidence: draft?.confidence || null,
+      // 어느 엔진이 만든 초안인지. "기호 탐지기 단독"이면 통로가 추정이라
+      // 검수할 때 봐야 할 곳이 다르다 — 목록에서 바로 보이게 저장해 둔다.
+      readEngine: draft?.engine || null,
       readNotes: draft?.notes || '',
       readWarnings: draft?.warnings || [],
       readError,
@@ -236,6 +230,7 @@ planRoutes.post('/plans/draft', async (req, res, next) => {
       exits: plan.nodes.filter(n => n.type === 'exit').length,
       rooms: plan.nodes.filter(n => n.type === 'room').length,
       confidence: draft?.confidence || null,
+      engine: draft?.engine || null,
       scaleEstimated: estimated,
       notes: draft?.notes || '',
       warnings: [...(draft?.warnings || []), ...errors, ...(readError ? [readError] : [])],

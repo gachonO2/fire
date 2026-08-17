@@ -220,24 +220,46 @@ ADMIN_TOKEN=아무_긴_문자열     # 설정하면 관제 API에 x-admin-token 
 
 ### 대피도 인식 — 3~5단계를 모델이 대신하기
 
-한 층에 장소 20~30곳을 손으로 찍고 잇는 일이 도면 등록의 대부분이다.
-`ml/`에 그 첫 단계를 대신하는 탐지 모델과 학습 데이터가 있다.
+한 층에 장소 20~30곳을 손으로 찍고 잇는 일이 도면 등록의 대부분이다(도면 하나에 10분쯤).
+편집기의 **AI로 읽기**를 누르면 그 옮겨 적기를 모델이 대신한다.
 
-층별 피난안내도 사진에서 **비상구·계단·엘리베이터·소화기·소화전·현재위치·문·실**을 찾고,
-실 사각형 바깥을 복도로 삼아 지점들을 이어 도면 JSON을 만든다.
-그 JSON을 편집기의 **가져오기**로 열면 3~5단계가 채워진 채로 시작한다.
+여기에는 성격이 다른 두 모델이 쓰이고, **각자 잘하는 것만** 한다.
 
-학습은 두 단계다. **1부**는 합성 도면 100장(`ml/dataset/`에 들어 있음)으로 기호 생김새를
-크게 잡고, **2부**는 실제로 안내할 건물의 피난안내도 100장을 찍어 이어서 학습한다.
-1부만으로는 실제 사진에서 성능이 떨어진다 — 1부는 2부의 라벨링 시간을 17시간에서
-3시간으로 줄이기 위한 발판이다(1부 모델이 밑라벨을 깔아 준다).
+| | 기호 탐지기 ([ml/detector](ml/detector/)) | 언어모델 (Gemini · Claude) |
+|---|---|---|
+| 하는 일 | 비상구·계단·실·문이 **어디 있는지** | 적힌 **이름**과 **통로 연결** |
+| 방식 | 피난안내도로 직접 학습시킨 YOLO 두 벌 | 도면의 복도 선·초록 피난경로 화살표를 읽음 |
+| 못 하는 것 | 글자를 못 읽고 통로도 모름 | 좌표가 눈대중이라 몇십 px 씩 어긋남 |
 
-- 학습: `ml/train_colab.ipynb` (코랩, 1부 20~30분 + 2부 15분)
-- 실제 도면 수집: `ml/label_assist.py`(밑라벨) → labelImg 검수 → `ml/import_real.py`(병합)
-- 자세한 내용은 [ml/README.md](ml/README.md)
+그래서 **좌표는 탐지기, 이름과 통로는 언어모델**로 나눈다.
+한쪽만 있어도 돌아가고, 편집기가 어느 조합으로 읽었는지 화면에 밝힌다.
+
+| 붙어 있는 것 | 결과 |
+|---|---|
+| 둘 다 | 탐지기가 찍은 지점 위에 언어모델이 이름·통로를 얹는다 (가장 정확) |
+| 탐지기만 | 지점은 정확, 통로는 기하학적 추정, 이름은 번호 (`실 1`, `비상구 2`…) |
+| 언어모델만 | 예전 방식 — 좌표까지 언어모델이 읽는다 |
+| 둘 다 없음 | 판독을 시작하지 않고 손으로 그리기로 넘어간다 |
+
+탐지기 실행 (없어도 도면 등록은 그대로 된다):
+
+```bash
+cd ml/detector
+python -m venv .venv && .venv\Scripts\activate   # macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app:app --port 8001
+```
+
+가중치·클래스 표·설정은 [ml/detector/README.md](ml/detector/README.md).
+
+**통로 추정에서 지키는 것 하나** — 탐지기 단독으로 통로를 만들 때, 실(방) 사각형을
+가로지르는 연결은 거부한다. 방은 벽으로 둘러싸인 공간이라 그 안을 관통하는 복도는 없다.
+이 규칙 하나로 "직선거리가 가까워 이었는데 사이에 교실이 있는" 연결이 걸러진다.
+끊긴 곳은 벽을 뚫어 잇지 **않고** 끊겼다고 알린다 — 없는 통로를 만들면
+시각장애인이 벽으로 걸어간다.
 
 **모델이 만든 것은 초안이다.** 편집기에서 사람이 확인하고 고친 뒤 활성화한다 —
-잘못된 도면은 그대로 오안내가 된다.
+초안(`draft`)은 활성화 자체가 막혀 있다. 잘못된 도면은 그대로 오안내가 된다.
 
 ### 샘플 3D 도면 — 가천관 3층
 
@@ -674,10 +696,20 @@ backend/
 │   ├── floor.js            활성 도면 + 통합 위험 상태 (관제 + 센서)
 │   ├── events.js           내부 이벤트 허브 → SSE
 │   ├── guardian-code.js    보호자 공유 코드 생성
+│   ├── planReader.js       도면 판독 — 탐지기와 언어모델을 합치는 이음매
+│   ├── planReader/
+│   │   ├── detector.js     ml/detector 호출 (꺼져 있으면 null, 예외 아님)
+│   │   ├── graph.js        탐지 상자 → 지점·통로 (실을 관통하는 연결은 거부)
+│   │   └── providers.js    Anthropic 규격 · Google 직접 연결
 │   ├── middleware/auth.js  관제 토큰 검증
 │   ├── repositories/       FirestoreRepo | MemoryRepo (동일 인터페이스)
 │   └── routes/             evacuation · hazards · fires · sensors · plans · telemetry · guardians · stream
 └── test/api.test.mjs       API 통합 테스트 71종
+
+ml/detector/                ← 도면 기호 탐지 (파이썬 · 별도 프로세스)
+├── app.py                  FastAPI — /health · /detect
+├── hybrid_detector.py      두 모델 결과 합치기 + 클래스별 NMS
+└── models/*.pt             학습된 YOLO 가중치 두 벌
 
 frontend/
 ├── demo.html               시연 콘솔 (대피·화재를 한 화면에서 조작) ← 발표용
@@ -707,7 +739,9 @@ scripts/
 └── sync-shared.mjs         shared/ → frontend/shared/ 복사 (배포용)
 
 .vscode/launch.json         F5 실행 구성 (백엔드 · 각 테스트)
-test/route.test.mjs         경로탐색 시나리오 테스트 9종
+test/route.test.mjs         경로탐색 시나리오 테스트
+test/positioning.test.mjs   비콘 측위 — 깜빡임·전환 순서·순간이동 억제
+test/plan-reader.test.mjs   탐지 결과 → 그래프 (소화기 제외 · 실 관통 금지)
 vendor/                     참고한 오픈소스 원본 (MIT)
 ```
 

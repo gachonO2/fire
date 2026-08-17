@@ -92,6 +92,7 @@ export class FirestoreRepo {
         // 앱에서 올라온 초안인지. 편집기가 "확인 필요"로 표시하고, 활성화는 막힌다.
         draft: Boolean(p.draft),
         readConfidence: p.readConfidence || null,
+        readEngine: p.readEngine || null,
         updatedAt: p.updatedAt,
       };
     });
