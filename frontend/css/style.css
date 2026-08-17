@@ -56,6 +56,20 @@ h3 { font-size: 1.05rem; margin: 18px 0 8px; color: var(--text-dim); }
 
 .hint { color: var(--text-dim); font-size: 0.9rem; margin-bottom: 14px; }
 
+/* 비콘이 찾아낸 현재 위치 — 시작 화면에서 사용자가 가장 먼저 확인하는 정보라
+   본문보다 크게 두고, 확정되면 경로 색으로 바꿔 "찾았다"를 색으로도 알린다. */
+.beacon-status {
+  font-size: 1.15rem;
+  line-height: 1.5;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  border-radius: 12px;
+  background: #12202b;
+  border: 2px solid #24384a;
+  color: var(--text-dim);
+}
+.beacon-status.found { color: var(--route); border-color: var(--route); }
+
 /* 버튼 */
 .big-btn {
   display: block;
@@ -794,3 +808,22 @@ h3 { font-size: 1.05rem; margin: 18px 0 8px; color: var(--text-dim); }
 .guardian-line { margin-top: 4px; color: var(--text); font-size: 0.86rem; }
 .guardian-line a { color: var(--route); }
 .empty { color: var(--text-dim); }
+
+
+/* 방향 확인(나의 찾기식) — 누른 채로 폰을 돌려 방향을 찾는다.
+   한 손은 지팡이를 잡으므로, 버튼은 보지 않고도 누를 수 있게 크고 넓어야 한다. */
+.big-btn.scan {
+  width: 100%;
+  min-height: 96px;
+  font-size: 1.15rem;
+  background: #1d4ed8;
+  color: #fff;
+  border: none;
+  border-radius: 14px;
+  margin-bottom: .5rem;
+  touch-action: none;          /* 누른 채 돌릴 때 스크롤·확대 방지 */
+  user-select: none;
+}
+.big-btn.scan[data-active="true"] { background: #16a34a; }
+.scan-help  { font-size: .85rem; color: #6b7280; margin: 0 0 .35rem; line-height: 1.5; }
+.scan-state { font-size: 1.05rem; font-weight: 700; min-height: 1.6em; margin: 0 0 .75rem; }

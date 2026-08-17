@@ -410,6 +410,20 @@ export class EvacuationSession {
     }
   }
 
+  /**
+   * 측위가 "경로에 없는 지점"을 가리켰다 — 방위 오차보다 확실한 이탈 신호다.
+   *
+   * 방위 이탈(reportDeviation)은 "고개를 잘못 돌렸다"일 수도 있어 두 번 연속
+   * 어긋나야 인정하지만, 이건 이미 다른 지점에 **도착**했다는 뜻이라 바로 알린다.
+   * 대신 확신도는 덜 깎는다 — 어디인지는 알고 있으니 안전상태까지 갈 일은 아니다.
+   */
+  reportOffRoute(placeName) {
+    this._announceWrongWay(`경로를 벗어났습니다. ${placeName} 부근입니다.`);
+    const conf = this.odometry ? this.odometry.degradeConfidence(0.2) : 1;
+    if (conf < CONFIDENCE_FLOOR) this.enterSafeHold('측위 위치가 경로를 벗어났습니다.');
+    this.onChange(this);
+  }
+
   /** 경로 이탈 — 멈춰 세우고 확신도를 깎는다 */
   reportDeviation(err) {
     const dirText = err > 0 ? '오른쪽' : '왼쪽';

@@ -52,7 +52,35 @@ async function main() {
   });
 
   $('image-input').addEventListener('change', onImageSelected);
+  $('ai-read').addEventListener('click', readPlanWithAi);
+
+  // 키가 아예 없으면 버튼을 감춘다 — 눌러도 안 되는 버튼은 없느니만 못하다.
+  // 키는 있는데 모델이 그림을 못 보는 경우는 **감추지 않고 이유를 보여준다.**
+  // 사용자가 고칠 수 있는 문제이고, 조용히 사라지면 왜 없는지 알 수가 없다.
+  api.readerAvailable()
+    .then(r => {
+      if (!r?.configured) return;
+      $('ai-read-box').hidden = false;
+      if (!r.available) {
+        // "지금 붐빔"과 "못 쓴다"는 다르다. 전자는 버튼을 살려둬야 다시 눌러볼 수 있다.
+        $('ai-read').disabled = !r.retryable;
+        setAiStatus(
+          r.retryable
+            ? `지금은 판독 서버가 붐빕니다. 잠시 뒤 버튼을 눌러보세요.\n${r.reason}`
+            : `판독을 쓸 수 없습니다.\n${r.reason}`,
+          true,
+        );
+      }
+    })
+    .catch(() => {});
   $('floor-width').addEventListener('input', recomputeScale);
+  $('north-offset').addEventListener('input', () => {
+    const v = Number($('north-offset').value);
+    // 빈 칸은 "모른다"는 뜻이다. 0(북)과 구분해야 한다 — 모르는 걸 0으로 저장하면
+    // 앱이 자신 있게 엉뚱한 방향을 가리킨다.
+    state.plan.northOffset = $('north-offset').value.trim() === '' || !Number.isFinite(v)
+      ? null : ((v % 360) + 360) % 360;
+  });
   $('step-length').addEventListener('input', () => {
     state.plan.stepLength = Number($('step-length').value) || 0.7;
     draw();
@@ -71,6 +99,7 @@ async function main() {
 
   // 현재 활성 도면을 편집 대상으로 불러온다
   await api.loadFloorPlan();
+  // 도면이 없으면 빈 편집기로 시작한다 (예제를 심지 않는다)
   loadIntoEditor(api.floorPlan.toJSON(), api.backgroundImage);
 
   await api.connect();
@@ -85,6 +114,7 @@ function loadIntoEditor(plan, image) {
   $('plan-id').value = state.plan.id || '';
   $('plan-name').value = state.plan.name || '';
   $('step-length').value = state.plan.stepLength ?? 0.7;
+  $('north-offset').value = Number.isFinite(state.plan.northOffset) ? state.plan.northOffset : '';
 
   const width = state.plan.image?.width;
   $('floor-width').value = width
@@ -119,6 +149,83 @@ async function onImageSelected(e) {
   recomputeScale();
   setStatus(`도면 이미지 등록: ${width}×${height}px, ${Math.round(dataUri.length / 1024)}KB`);
   draw();
+}
+
+// ------------------------------------------------------------- AI 판독
+
+/**
+ * 도면 사진에서 지점·통로를 대신 찍어온다.
+ *
+ * 피난안내도에는 비상구도 현 위치도 피난경로 화살표도 **이미 그려져 있다.**
+ * 없던 걸 만드는 게 아니라, 그림으로만 있는 것을 좌표로 옮겨 적는 일이고,
+ * 지금까지 사람이 클릭으로 하던 그 옮겨 적기를 대신하는 것이다.
+ *
+ * 결과는 **초안**이므로 저장하지 않고 편집기에 올려놓기만 한다. 비상구를 하나
+ * 잘못 찍으면 시각장애인이 벽으로 걸어가므로, 사람이 눈으로 확인한 뒤에야 저장된다.
+ */
+async function readPlanWithAi() {
+  if (!state.image) {
+    setAiStatus('먼저 도면 이미지를 올려주세요.', true);
+    return;
+  }
+  const had = state.plan.nodes.length;
+  if (had && !confirm(`이미 찍어둔 지점 ${had}개가 있습니다.\n읽어온 결과로 바꿀까요?`)) return;
+
+  const btn = $('ai-read');
+  btn.disabled = true;
+  setAiStatus('도면을 읽는 중입니다… (20초~1분 걸립니다)');
+
+  try {
+    const draft = await api.readPlanImage({
+      dataUri: state.image,
+      width: state.plan.image?.width,
+      height: state.plan.image?.height,
+    });
+
+    state.plan.nodes = draft.nodes;
+    state.plan.edges = draft.edges;
+    state.selected = null;
+    state.pendingEdgeFrom = null;
+    // 읽어온 id 와 겹치지 않게 이후 자동 번호를 뒤로 민다
+    state.seq = draft.nodes.length + 1;
+
+    if (draft.buildingName && !$('plan-name').value) {
+      $('plan-name').value = [draft.buildingName, draft.floorLabel].filter(Boolean).join(' ');
+      state.plan.name = $('plan-name').value;
+    }
+
+    recomputeScale();
+    renderInspector();
+    draw();
+
+    const exits = draft.nodes.filter(n => n.type === 'exit').length;
+    setAiStatus(
+      [
+        `지점 ${draft.nodes.length}개 · 통로 ${draft.edges.length}개 · 출구 ${exits}곳을 읽었습니다.`,
+        CONFIDENCE_NOTE[draft.confidence] || '',
+        draft.notes,
+        ...(draft.warnings || []),
+      ].filter(Boolean).join('\n'),
+      draft.confidence === 'low' || (draft.warnings || []).length > 0,
+    );
+  } catch (err) {
+    setAiStatus(err.message || '판독에 실패했습니다. 손으로 그려주세요.', true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+const CONFIDENCE_NOTE = {
+  high: '⚠️ 그래도 출구 위치는 눈으로 한 번 확인하세요.',
+  medium: '⚠️ 일부가 불확실합니다. 통로 연결을 꼭 확인하세요.',
+  low: '⚠️ 신뢰도가 낮습니다. 사진이 흐리거나 가려졌을 수 있으니 전부 확인하세요.',
+};
+
+function setAiStatus(text, isError = false) {
+  const el = $('ai-read-status');
+  el.textContent = text;
+  el.style.color = isError ? '#b91c1c' : '#374151';
+  el.style.whiteSpace = 'pre-line';
 }
 
 /** Firestore 문서 한도에 맞도록 브라우저에서 미리 축소·압축한다 */
@@ -395,6 +502,10 @@ function renderInspector() {
         ${NODE_TYPES.map(t => `<option value="${t}" ${t === node.type ? 'selected' : ''}>${NODE_TYPE_LABELS[t]}</option>`).join('')}
       </select>
 
+      <label for="ins-beacon">비콘 ID <span class="hint-inline">측위용 · 선택</span></label>
+      <input id="ins-beacon" type="text" value="${escapeHtml(node.beaconId ?? '')}" placeholder="예: BC-302" />
+      <p class="hint">이 지점에 설치한 비콘의 식별자. 폰이 이 비콘을 가장 세게 수신하면 여기가 현재 위치가 됩니다.</p>
+
       <label for="ins-desc">장소 설명 <span class="hint-inline">사용자가 “여기가 어디인가요?”를 누르면 읽어줍니다</span></label>
       <textarea id="ins-desc" rows="2" maxlength="${MAX_DESCRIPTION}"
         placeholder="복도가 좌우로 갈라지는 곳입니다.">${escapeHtml(node.description || '')}</textarea>
@@ -425,6 +536,11 @@ function renderInspector() {
         renderPlaceList();
       });
     }
+    $('ins-beacon').addEventListener('input', e => {
+      const v = e.target.value.trim();
+      if (v) node.beaconId = v; else delete node.beaconId;
+      validate();
+    });
     $('ins-delete').addEventListener('click', () => deleteNode(node.id));
     return;
   }
@@ -518,12 +634,16 @@ async function refreshPlanList() {
   const ul = $('plan-list');
   try {
     const plans = await api.listPlans();
+    // 앱에서 올라온 초안은 눈에 띄게 구분한다. 확인 전에는 활성화가 막혀 있으므로
+    // "사용하기" 버튼도 내주지 않는다 — 눌러도 안 되는 버튼은 혼란만 준다.
     ul.innerHTML = plans.map(p => `<li>
-      <strong>${escapeHtml(p.name)}</strong> ${p.active ? '<span class="badge-active">사용 중</span>' : ''}
-      <div class="time">${p.id} · 지점 ${p.nodeCount} · 통로 ${p.edgeCount}${p.hasImage ? ' · 도면 이미지 있음' : ''}</div>
+      <strong>${escapeHtml(p.name)}</strong>
+      ${p.active ? '<span class="badge-active">사용 중</span>' : ''}
+      ${p.draft ? '<span class="badge-active" style="background:#f59e0b;color:#1f2937">📱 앱에서 접수 · 확인 필요</span>' : ''}
+      <div class="time">${p.id} · 지점 ${p.nodeCount} · 통로 ${p.edgeCount}${p.hasImage ? ' · 도면 이미지 있음' : ''}${p.draft && p.readConfidence ? ` · 판독 신뢰도 ${p.readConfidence}` : ''}</div>
       <div class="actions-inline">
-        <button class="tool-btn" data-load="${p.id}">불러오기</button>
-        ${p.active ? '' : `<button class="tool-btn" data-activate="${p.id}">사용하기</button>`}
+        <button class="tool-btn" data-load="${p.id}">${p.draft ? '확인하기' : '불러오기'}</button>
+        ${p.active || p.draft ? '' : `<button class="tool-btn" data-activate="${p.id}">사용하기</button>`}
       </div>
     </li>`).join('') || '<li class="empty">등록된 도면 없음</li>';
 

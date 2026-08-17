@@ -2,7 +2,16 @@
  * 백엔드 API 통합 테스트 (인메모리 저장소 기준).
  * 실행: node backend/test/api.test.mjs
  */
-import { createApp } from '../src/app.js';
+import os from 'node:os';
+import path from 'node:path';
+import fs from 'node:fs';
+
+// 운영 데이터를 건드리지 않도록 임시 폴더에 저장한다 (import 보다 먼저 설정)
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'fire-test-'));
+process.env.FIRE_DATA_DIR = TMP;
+
+const { createApp } = await import('../src/app.js');
+const { DEMO_PLAN } = await import('./fixtures/demo-plan.js');
 
 let failed = 0;
 function expect(name, cond, detail = '') {
@@ -21,6 +30,12 @@ const api = async (pathname, opts = {}) => {
   });
   return { status: res.status, body: await res.json() };
 };
+
+// 서버는 이제 **빈 상태로 시작한다** — 예제 도면을 심지 않는다.
+// 실제 건물을 등록해도 재시작하면 시연용 병원으로 되돌아갔기 때문이다.
+// 그래서 테스트가 쓸 도면은 테스트가 직접 넣는다.
+await api('/api/plans', { method: 'POST', body: JSON.stringify(DEMO_PLAN) });
+await api(`/api/plans/${DEMO_PLAN.id}/activate`, { method: 'PUT' });
 
 // 1) health — 저장소 모드 보고
 const health = await api('/api/health');

@@ -98,4 +98,4 @@ export function routeToNearestExit(floorPlan, fromId, hazards = {}) {
     }
   }
   return best;
-}
+} 

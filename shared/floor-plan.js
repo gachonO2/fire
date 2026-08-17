@@ -53,7 +53,27 @@ export class FloorPlan {
     return Math.max(1, Math.round(this.edgeLength(edge) / this.stepLength));
   }
 
-  /** 나침반식 방위각(도): 0=북(화면 위), 90=동, 180=남, 270=서 */
+  /**
+   * 도면의 **위쪽이 실제로 몇 도인가**(자북 기준). null 이면 모르는 상태.
+   *
+   * 도면은 종이에 아무 방향으로나 그려진다 — 위쪽이 북쪽이라는 보장이 전혀 없다.
+   * 이 값이 없으면 `bearing()` 은 **도면 안에서만** 참인 각도이고, 나침반과 견줄 수 없다.
+   *
+   * 좌우 회전 안내("여기서 왼쪽")는 이전 구간과의 **차이**라서 이 값이 없어도 맞는다.
+   * 하지만 "폰을 이쪽으로 돌리세요" 같은 **절대 방향 안내**는 이게 있어야 한다.
+   */
+  get northOffset() {
+    const v = this.plan.northOffset;
+    return Number.isFinite(v) ? ((v % 360) + 360) % 360 : null;
+  }
+
+  /** 실제 나침반 기준 방위. northOffset 을 모르면 null — 모르면 안내하지 않는다. */
+  trueBearing(fromId, toId) {
+    if (this.northOffset === null) return null;
+    return (this.bearing(fromId, toId) + this.northOffset) % 360;
+  }
+
+  /** 도면 안에서의 방위각(도): 0=도면 위쪽, 90=오른쪽, 180=아래, 270=왼쪽 */
   bearing(fromId, toId) {
     const a = this._nodes.get(fromId);
     const b = this._nodes.get(toId);
@@ -83,6 +103,21 @@ export class FloorPlan {
   /** 설명이 저장된 장소만 */
   describedPlaces() {
     return this.plan.nodes.filter(n => n.description?.trim() || n.landmark?.trim());
+  }
+
+  /**
+   * beaconId → nodeId 매핑 — 측위(최근접 비콘 판정)의 유일한 입력.
+   * 비콘은 노드에 붙는다: 스캔에서 가장 센 비콘의 노드가 곧 현재 위치다.
+   */
+  beaconMap() {
+    const map = {};
+    for (const n of this.plan.nodes) if (n.beaconId) map[n.beaconId] = n.id;
+    return map;
+  }
+
+  /** 비콘이 붙은 노드들 — 시뮬레이터가 이 노드들에서 신호를 발생시킨다 */
+  beaconNodes() {
+    return this.plan.nodes.filter(n => n.beaconId);
   }
 
   /** 특정 노드에 연결된 모든 통로 — 노드 단위 센서가 과열되면 여기를 전부 막는다 */
@@ -135,6 +170,7 @@ export function validatePlan(plan) {
   if (errors.length) return errors;
 
   const ids = new Set();
+  const beaconIds = new Set();
   for (const n of plan.nodes) {
     if (!n.id) { errors.push('id가 없는 노드가 있습니다.'); continue; }
     if (ids.has(n.id)) errors.push(`노드 id가 중복됩니다: ${n.id}`);
@@ -150,6 +186,12 @@ export function validatePlan(plan) {
       else if (v.length > MAX_DESCRIPTION) {
         errors.push(`${n.id}의 설명이 너무 깁니다 (${v.length}자 / 최대 ${MAX_DESCRIPTION}자)`);
       }
+    }
+
+    // 비콘 하나가 두 노드에 붙으면 측위가 두 위치 사이에서 갈팡질팡한다
+    if (n.beaconId) {
+      if (beaconIds.has(n.beaconId)) errors.push(`비콘 id가 중복됩니다: ${n.beaconId}`);
+      beaconIds.add(n.beaconId);
     }
   }
 
@@ -169,6 +211,11 @@ export function validatePlan(plan) {
 
   if (plan.metersPerUnit != null && !(plan.metersPerUnit > 0)) {
     errors.push('metersPerUnit은 0보다 커야 합니다.');
+  }
+
+  // 없어도 저장은 된다(좌우 회전 안내는 여전히 맞으므로). 다만 값이 있다면 각도여야 한다.
+  if (plan.northOffset != null && !Number.isFinite(plan.northOffset)) {
+    errors.push('northOffset은 각도(숫자)여야 합니다.');
   }
 
   return errors;

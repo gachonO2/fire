@@ -16,6 +16,7 @@ import { Odometry } from './odometry.js';
 import { Api } from './api.js';
 import { EvacuationSession } from './evacuation.js';
 import { DirectionScanner } from './direction-scan.js';
+import { BeaconSense } from './beacon.js';
 import { renderMap } from './minimap.js';
 import { createPanels } from './panels.js';
 import {
@@ -33,6 +34,7 @@ const api = new Api();
 const guidance = new Guidance();
 const odometry = new Odometry();
 const scanner = new DirectionScanner({ odometry });
+const beacon = new BeaconSense(() => api.floorPlan, trueDemoPosition);
 
 let session = null;
 let fires = [];
@@ -52,6 +54,10 @@ let trainingStartTimer = null;
 let sosPressCount = 0;
 let sosResetTimer = null;
 let guardianNotice = '';
+/** 비콘이 마지막으로 판정한 지점 — 대피 중 이탈 감지에 쓴다 */
+let beaconNodeId = null;
+/** 비콘 없는 건물의 시뮬레이션에서 "실제로 서 있는" 지점 */
+let standNodeId = null;
 
 /** 보호자 연동이 새로고침 후에도 유지되도록 사용자 ID를 기기에 고정한다. */
 function persistentUserId() {
@@ -96,6 +102,9 @@ async function main() {
       }
       buildStartPicker();
     }
+    // 이전 건물의 비콘 id로 판정하면 엉뚱한 지점을 가리킨다 — 매핑을 다시 만든다
+    standNodeId = null;
+    startBeacons();
     render();
   });
   api.on('hazards', (h, meta = {}) => {
@@ -233,9 +242,11 @@ function buildStartPicker() {
  * 우선순위:
  *  1. URL의 ?at=<장소ID> — **벽에 붙인 NFC 태그·QR이 이 주소를 연다.**
  *     폰을 대기만 하면 앱이 열리면서 위치가 확정된다. 가장 현실적인 방법이다.
- *  2. Web NFC 능동 스캔 — 앱이 이미 열려 있을 때 태그에 대면 인식
- *  3. QR 카메라
- *  4. 마지막으로 확인된 위치 (건물을 벗어나지 않았다면 대개 맞다)
+ *  2. BLE 비콘 — **아무것도 안 해도** 잡힌다. 태그는 벽을 손으로 훑어 찾아야 하지만
+ *     비콘은 그 자리에 서 있기만 하면 된다. 설치된 건물에서는 이게 제일 빠르다.
+ *  3. Web NFC 능동 스캔 — 앱이 이미 열려 있을 때 태그에 대면 인식
+ *  4. QR 카메라
+ *  5. 마지막으로 확인된 위치 (건물을 벗어나지 않았다면 대개 맞다)
  *
  * 그래도 모르면 **모른다고 말하고**, 대피는 막지 않는다 (startEvacuation 참고).
  */
@@ -249,6 +260,9 @@ function setStartPlace(nodeId, { speak = false, source = '수동 선택' } = {})
   placeVerified = true;
   verifiedPlanId = api.floorPlan.id;
   placeSource = source;
+  // 시뮬레이션의 "실제로 서 있는 곳"도 함께 옮긴다. 그래야 비콘이 그 자리에서
+  // 신호를 만들고, 태그로 위치를 바꾼 뒤에도 측위가 따라온다.
+  standNodeId = nodeId;
   localStorage.setItem('fireguide:lastPlace', nodeId);
 
   $('idle-place').textContent = node.name;
@@ -289,6 +303,61 @@ async function detectPlace() {
 
   // 3. NFC는 사용자 동작 없이도 대기할 수 있으면 미리 켜 둔다
   startNfcScan({ silent: true });
+
+  // 4. 비콘도 함께 돌린다. 먼저 확정되는 쪽이 이긴다 — 둘 다 사용자 조작이 필요 없다.
+  startBeacons();
+}
+
+// ------------------------------------------------------------ 비콘 측위
+/**
+ * 비콘으로 현재 위치를 스스로 찾는다.
+ *
+ * 태그·QR과 경쟁하지 않고 **보완**한다. 태그는 벽의 정해진 자리를 찾아야 하고
+ * QR은 카메라를 겨눠야 하지만, 비콘은 서 있기만 하면 잡힌다. 대신 정밀도는
+ * 노드 단위이고 확정까지 몇 초가 걸리므로, 태그로 이미 확인된 위치는 덮지 않는다.
+ */
+function startBeacons() {
+  beacon.stop();
+  if (!beacon.start()) return;   // 도면이 없으면 조용히 넘어간다 (화면은 이미 그 사실을 말한다)
+  // 비콘 기기가 없는 건물에서는 시뮬레이션이 돈다. 그 기준 좌표가 될 지점.
+  standNodeId ||= session?.startNodeId
+    || (api.floorPlan.nodes.find(n => n.type === 'room') || api.floorPlan.nodes[0])?.id;
+  beacon.onLocate = onBeaconLocate;
+}
+
+/**
+ * 시뮬레이션이 신호를 만들 기준 좌표(= 사용자가 실제로 있는 곳).
+ * 안내 중에는 경로상 위치, 대피 전에는 서 있는 지점이다.
+ */
+function trueDemoPosition() {
+  const onRoute = session?.position();
+  if (onRoute) return onRoute;
+  const node = api.floorPlan.getNode(standNodeId);
+  return node ? { x: node.x, y: node.y } : null;
+}
+
+function onBeaconLocate(nodeId, { locked, node }) {
+  beaconNodeId = nodeId;
+  if (!node) return;
+
+  if (session?.phase === 'idle') {
+    // 확정 전(locked=false)의 잠정값은 흔들린다. 그때마다 말하면 "여기다 저기다"가 된다.
+    if (!locked) return;
+    // 태그·QR로 이미 확인된 위치는 덮지 않는다. 그쪽이 더 정확하고,
+    // 사용자가 방금 직접 확인한 값이 몇 초 뒤 소리 없이 바뀌면 신뢰를 잃는다.
+    if (placeVerified && verifiedPlanId === api.floorPlan.id) return;
+    setStartPlace(nodeId, {
+      speak: true,
+      source: beacon.virtual ? '비콘 시뮬레이션' : '비콘 신호',
+    });
+    return;
+  }
+
+  // 안내 중 경로에 없는 지점에서 신호가 잡히면 실제로 벗어난 것이다.
+  // 나침반 이탈 감지보다 확실한 신호라 그대로 이탈로 넘긴다.
+  if (session?.phase === 'guiding' && session.route && !session.route.nodes.includes(nodeId)) {
+    session.reportOffRoute(node.name);
+  }
 }
 
 /** 한 버튼에서 인식 방법을 추측하지 않고 사용자가 만진 표지에 맞는 방법을 고르게 한다. */

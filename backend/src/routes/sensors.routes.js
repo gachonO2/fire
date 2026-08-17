@@ -21,6 +21,8 @@ sensorRoutes.post('/sensors/temperature', async (req, res) => {
   if (!edgeId && !nodeId) return res.status(400).json({ error: 'edgeId 또는 nodeId가 필요합니다.' });
 
   const floorPlan = await activeFloorPlan();
+
+  if (!floorPlan) return res.status(404).json({ error: '등록된 도면이 없습니다. 먼저 피난안내도를 등록하고 활성화해주세요.' });
   if (edgeId && !floorPlan.hasEdge(edgeId)) {
     return res.status(404).json({ error: `현재 도면에 없는 통로입니다: ${edgeId}` });
   }
