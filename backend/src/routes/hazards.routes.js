@@ -56,7 +56,6 @@ hazardRoutes.post('/hazards/reset', requireAdmin, async (req, res) => {
   const repo = await getRepo();
   await repo.resetHazards();
   await repo.clearSensors();
-  await repo.clearFires();
   res.json({ ok: true, hazards: await currentHazards() });
 });
 

@@ -38,19 +38,14 @@ export class Api {
     this.storage = '연결 중…';
     this.listeners = {
       hazards: [], sos: [], positions: [], metrics: [],
-      alerts: [], sensors: [], plan: [], fires: [], status: [],
+      alerts: [], sensors: [], plan: [], status: [],
     };
     this._es = null;
-    this._reopenTimer = null;
-    this._watchdog = null;
-    this._retryDelay = 1000;
 
     // 통신이 끊겨도 안내를 이어가려면 도면이 손에 있어야 한다.
     // 마지막으로 받은 도면 → 없으면 빈 도면. 예제 건물로 채우지 않는다.
-    // 순서 주의: _loadPlanCache() 가 캐시된 도면 이미지도 함께 되살리므로
-    // 초기화는 **그 앞에서** 해야 한다. 뒤에 두면 오프라인에서 배경이 사라진다.
-    this.backgroundImage = null;
     this.floorPlan = new FloorPlan(this._loadPlanCache() || EMPTY_PLAN);
+    this.backgroundImage = null;
   }
 
   /** 안내에 쓸 수 있는 도면이 있는가 (출구가 하나라도 있어야 한다) */
@@ -63,8 +58,6 @@ export class Api {
     try {
       const plan = await this._fetch('/api/map');
       this._setPlan(plan);
-      // JSON이 캐시와 같아도 설계도 이미지가 새로 등록되었을 수 있다.
-      await this._loadPlanImage(plan.id);
     } catch (_) { /* 오프라인 — 캐시/기본 도면 사용 */ }
     return this.floorPlan;
   }
@@ -110,29 +103,15 @@ export class Api {
 
   _openStream() {
     if (this._es) this._es.close();
-    clearTimeout(this._reopenTimer);
-    this._reopenTimer = null;
-
     const url = this.code
       ? `${BASE}/api/stream?code=${encodeURIComponent(this.code)}`
       : `${BASE}/api/stream`;
     const es = new EventSource(url);
     this._es = es;
-    // 서버는 연결 직후 각 주제의 현재 상태를 한 번 보낸다.
-    // 이 첫 묶음은 새 사건이 아니라 화면 동기화라는 사실을 구독자에게 알려 준다.
-    const receivedTopics = new Set();
 
-    // 브라우저 자동 재연결이 안 되는 경우를 대비한 감시자 (아래 onerror 설명 참고)
-    clearInterval(this._watchdog);
-    this._watchdog = setInterval(() => {
-      if (this._es?.readyState === EventSource.CLOSED) this._scheduleReopen();
-    }, 5000);
-
-    for (const topic of ['hazards', 'sos', 'positions', 'metrics', 'alerts', 'sensors', 'plan', 'fires']) {
+    for (const topic of ['hazards', 'sos', 'positions', 'metrics', 'alerts', 'sensors', 'plan']) {
       es.addEventListener(topic, e => {
         const data = JSON.parse(e.data);
-        const initial = !receivedTopics.has(topic);
-        receivedTopics.add(topic);
         if (topic === 'hazards') {
           this.hazards = data;
           this._saveCache(data);
@@ -140,38 +119,14 @@ export class Api {
         // 관제에서 다른 도면을 활성화하면 여기로 내려온다
         if (topic === 'plan') this._setPlan(data);
         this._setOnline(true);
-        this._emit(topic, data, { initial, source: 'stream' });
+        this._emit(topic, data);
       });
     }
 
-    /**
-     * EventSource는 "연결이 끊긴" 경우에만 스스로 재연결한다.
-     * 서버가 200이 아닌 응답을 주면 — 백엔드가 죽었을 때 개발 서버 프록시가 내리는
-     * 503이 정확히 이 경우다 — 재연결하지 않고 **영구히 닫힌다**.
-     * 그러면 백엔드가 다시 살아나도 화면은 계속 "연결 끊김"에 머문다.
-     * 그래서 닫힌 것을 직접 감지해 백오프를 두고 다시 연다.
-     */
-    es.onerror = () => {
-      this._setOnline(false);
-      if (es.readyState === EventSource.CLOSED) this._scheduleReopen();
-    };
-
-    es.onopen = () => {
-      this._retryDelay = 1000; // 성공했으니 백오프 초기화
-      // 재연결 시 저장소 표시가 "연결 안 됨"에 머물지 않도록 health를 다시 읽는다
-      if (!this.online) this._checkHealth();
-    };
-  }
-
-  /** 끊긴 스트림을 1초 → 2초 → … 최대 10초 간격으로 다시 연다 */
-  _scheduleReopen() {
-    if (this._reopenTimer) return;
-    const delay = this._retryDelay || 1000;
-    this._retryDelay = Math.min(delay * 2, 10000);
-    this._reopenTimer = setTimeout(() => {
-      this._reopenTimer = null;
-      this._openStream();
-    }, delay);
+    // EventSource는 끊기면 스스로 재연결한다. 그동안은 오프라인 모드로 안내.
+    es.onerror = () => this._setOnline(false);
+    // 재연결 시 저장소 표시가 "연결 안 됨"에 머물지 않도록 health를 다시 읽는다
+    es.onopen = () => { if (!this.online) this._checkHealth(); };
   }
 
   _setOnline(v) {
@@ -183,15 +138,15 @@ export class Api {
   on(topic, cb) {
     this.listeners[topic].push(cb);
     if (topic === 'hazards' && Object.keys(this.hazards).length) {
-      queueMicrotask(() => cb(this.hazards, { initial: true, source: 'cache' }));
+      queueMicrotask(() => cb(this.hazards));
     }
     return () => {
       this.listeners[topic] = this.listeners[topic].filter(f => f !== cb);
     };
   }
 
-  _emit(topic, data, meta = {}) {
-    this.listeners[topic].forEach(cb => cb(data, meta));
+  _emit(topic, data) {
+    this.listeners[topic].forEach(cb => cb(data));
   }
 
   // ---------------------------------------------------------------- 경로
@@ -293,28 +248,6 @@ export class Api {
   }
 
   resetSensors() { return this._fetch('/api/sensors/reset', { method: 'POST' }); }
-
-  // ------------------------------------------------------- 화재 발생 지점
-  /** 도면의 임의 좌표에 불을 낸다. 어떤 통로가 막히는지는 서버가 판정한다. */
-  startFire({ x, y, radius, label }) {
-    return this._fetch('/api/fires', {
-      method: 'POST', body: JSON.stringify({ x, y, radius, label }),
-    });
-  }
-
-  getFires() { return this._fetch('/api/fires'); }
-
-  updateFireRadius(fireId, radius) {
-    return this._fetch(`/api/fires/${encodeURIComponent(fireId)}`, {
-      method: 'PUT', body: JSON.stringify({ radius }),
-    });
-  }
-
-  removeFire(fireId) {
-    return this._fetch(`/api/fires/${encodeURIComponent(fireId)}`, { method: 'DELETE' });
-  }
-
-  resetFires() { return this._fetch('/api/fires/reset', { method: 'POST' }); }
 
   // ------------------------------------------------------------ 보호자 연동
   /** 보호자 등록 → 공유 코드 발급 (같은 사용자면 기존 코드 유지) */

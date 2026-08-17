@@ -9,8 +9,6 @@
  * 관제가 막아둔 통로를 열어주면 안 되기 때문이다.
  */
 
-import { pointToSegmentDistance } from './geometry.js';
-
 // 통행 가능 여부와 우회 가중치
 export const HAZARD_RULES = {
   fire:    { passable: false, severity: 5, label: '화재' },
@@ -87,76 +85,6 @@ export function hazardsFromSensors(sensors = [], floorPlan, now = Date.now()) {
   }
 
   return hazards;
-}
-
-/** 화재 반경 규칙 */
-export const FIRE = {
-  /** 기본 위험 반경(m) — 관제에서 조절한다 */
-  DEFAULT_RADIUS: 6,
-  /** 반경의 이 배수까지는 열기 때문에 지나갈 수는 있어도 강하게 피한다 */
-  HEAT_RATIO: 1.7,
-};
-
-/**
- * 화재 발생 지점 → 통로 위험 맵.
- *
- * 불은 통로 위가 아니라 **도면의 임의 지점**에서 난다. 그 지점에서 반경 안에
- * 걸리는 통로를 모두 막고, 그 바깥 열기 구간은 통행은 되지만 크게 우회하게 한다.
- * 통로의 양 끝점이 아니라 **선분까지의 최단거리**로 재기 때문에,
- * 복도 한가운데에서 난 불도 정확히 그 복도를 막는다.
- *
- * @param {Array} fires [{ id, x, y, radius(m) }] — 좌표는 도면 단위
- * @param {FloorPlan} floorPlan
- */
-export function hazardsFromFires(fires = [], floorPlan) {
-  const hazards = {};
-
-  const put = (edgeId, hazard) => {
-    const prev = hazards[edgeId];
-    if (!prev || HAZARD_RULES[hazard.type].severity > HAZARD_RULES[prev.type].severity) {
-      hazards[edgeId] = hazard;
-    }
-  };
-
-  for (const fire of fires) {
-    const radius = (fire.radius ?? FIRE.DEFAULT_RADIUS) / floorPlan.metersPerUnit;
-    const heatRadius = radius * FIRE.HEAT_RATIO;
-
-    for (const edge of floorPlan.edges) {
-      const a = floorPlan.getNode(edge.a);
-      const b = floorPlan.getNode(edge.b);
-      if (!a || !b) continue;
-
-      const dist = pointToSegmentDistance(fire.x, fire.y, a.x, a.y, b.x, b.y);
-      const meters = dist * floorPlan.metersPerUnit;
-
-      if (dist <= radius) {
-        put(edge.id, {
-          type: 'fire', label: '화재', source: 'fire', fireId: fire.id,
-          distance: Math.round(meters * 10) / 10,
-        });
-      } else if (dist <= heatRadius) {
-        put(edge.id, {
-          type: 'warm', label: `화재 인접 ${Math.round(meters)}m`, source: 'fire', fireId: fire.id,
-          distance: Math.round(meters * 10) / 10,
-        });
-      }
-    }
-  }
-
-  return hazards;
-}
-
-/** 화재 반경 안에 들어간 지점(장소)들 — 그 자리에 머물면 안 되는 곳 */
-export function nodesInFire(fires = [], floorPlan) {
-  const hit = new Set();
-  for (const fire of fires) {
-    const radius = (fire.radius ?? FIRE.DEFAULT_RADIUS) / floorPlan.metersPerUnit;
-    for (const n of floorPlan.nodes) {
-      if (Math.hypot(n.x - fire.x, n.y - fire.y) <= radius) hit.add(n.id);
-    }
-  }
-  return [...hit];
 }
 
 /** 여러 위험 출처를 합친다 — 통로마다 더 심각한 쪽이 이긴다. */

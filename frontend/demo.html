@@ -3,135 +3,54 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>실내 대피 시연</title>
+  <title>통합 시연 — 사용자 · 관제 · 보호자</title>
   <link rel="stylesheet" href="css/style.css" />
 </head>
-<body class="console-body">
+<body class="demo-body">
   <header class="topbar">
-    <h1 id="page-title">실내 대피 시연</h1>
+    <h1>🧯 통합 시연</h1>
     <nav class="topnav">
-      <a id="back-to-app" href="index.html" hidden>사용자 화면으로</a>
-      <label id="plan-control" class="plan-select"><span id="plan-label">건물</span>
-        <select id="plan-select" aria-label="안내할 건물 도면"></select>
-      </label>
+      <span id="guardian-code-badge" class="badge">보호자 연결 중…</span>
+      <button id="btn-reset" class="tool-btn">↺ 시나리오 초기화</button>
+      <a href="architect.html">📐 도면 편집기</a>
       <span id="mode-badge" class="badge">연결 중…</span>
     </nav>
   </header>
 
-  <div class="console">
-    <!-- 왼쪽: 지도 -->
-    <section class="console-map">
-      <div id="test-map-tools" class="test-map-tools" hidden role="group" aria-label="테스트 지도 조작">
-        <button class="tool-btn" data-map-tool="fire" aria-pressed="true">화재 배치</button>
-        <button class="tool-btn" data-map-tool="move" aria-pressed="false">사람 이동</button>
+  <div class="demo-grid">
+    <section class="demo-panel">
+      <div class="demo-panel-head">
+        <strong>① 사용자</strong>
+        <span>시각장애인 대피 안내 — 위치 선택 후 대피 시작</span>
+        <button class="demo-expand" data-target="frame-user" title="크게 보기">⤢</button>
       </div>
-      <svg id="map" role="img" aria-label="층 지도"></svg>
-      <p id="map-tip" class="map-tip"><strong>지도를 클릭하면 그 자리에 불이 납니다.</strong>
-        불이 난 곳을 피해 경로가 자동으로 다시 잡힙니다.</p>
+      <iframe id="frame-user" title="사용자 앱" allow="camera; microphone"></iframe>
     </section>
 
-    <!-- 오른쪽: 조작 -->
-    <aside class="console-side">
-      <div class="step-card" id="card-1">
-        <h2><span class="step-num">1</span> <span id="place-heading">어디서 출발하나요?</span></h2>
-        <p id="test-place-note" class="hint test-only" hidden>이 도면에 저장된 테스트 위치 5곳 중 하나를 선택하세요.</p>
-        <div id="start-picker" class="picker"></div>
+    <section class="demo-panel">
+      <div class="demo-panel-head">
+        <strong>② 관제</strong>
+        <span>통로 클릭으로 화재·연기·온도 주입</span>
+        <button class="demo-expand" data-target="frame-admin" title="크게 보기">⤢</button>
       </div>
+      <iframe id="frame-admin" title="관제 대시보드" src="admin.html"></iframe>
+    </section>
 
-      <div class="step-card" id="card-2">
-        <h2><span class="step-num">2</span> 대피를 시작하세요</h2>
-        <button id="btn-start" class="big-btn primary" disabled>대피 시작</button>
+    <section class="demo-panel">
+      <div class="demo-panel-head">
+        <strong>③ 보호자</strong>
+        <span>대피 시작 시 위치·경로·안내가 실시간 표시</span>
+        <button class="demo-expand" data-target="frame-guardian" title="크게 보기">⤢</button>
       </div>
-
-      <div class="step-card" id="card-3">
-        <h2><span class="step-num">3</span> 불을 내보세요</h2>
-        <label for="radius">불의 크기 <strong id="radius-out">6m</strong></label>
-        <input id="radius" type="range" min="2" max="20" step="1" value="6" />
-        <p class="hint">크기를 정하고 <strong>왼쪽 지도를 클릭</strong>하세요.
-          불이 커서 나갈 길이 다 막히면 그 자리에서 구조를 요청합니다.</p>
-        <button id="btn-put-out" class="big-btn secondary">불 모두 끄기</button>
-      </div>
-
-      <!-- 금속탐지기식 방향 찾기 -->
-      <div class="step-card" id="card-scan">
-        <h2><span class="step-num">4</span> 방향 찾기 체험</h2>
-        <p class="hint">폰을 좌우로 천천히 훑으세요.
-          <strong>신호가 끊기지 않고 이어지는 지점</strong>이 이동할 방향입니다.</p>
-
-        <div class="dial-wrap">
-          <div id="dial" class="dial" role="slider" tabindex="0"
-               aria-label="폰이 향한 방향" aria-valuemin="0" aria-valuemax="359" aria-valuenow="0">
-            <span class="dial-n">N</span>
-            <span id="dial-arrow" class="dial-arrow"></span>
-            <span id="dial-target" class="dial-target"></span>
-          </div>
-          <div class="dial-info">
-            <strong id="scan-level">—</strong>
-            <span id="scan-detail" class="hint">각도를 읽지 말고 신호의 간격으로 방향을 찾습니다.</span>
-            <label class="scan-sound">
-              <input id="scan-sound" type="checkbox" checked /> 소리로 듣기
-            </label>
-          </div>
-        </div>
-
-        <div class="scan-meter" aria-hidden="true">
-          <div class="scan-track">
-            <span class="scan-zone"></span>
-            <span id="scan-needle" class="scan-needle"></span>
-          </div>
-          <div class="scan-labels"><span>왼쪽</span><span>정면</span><span>오른쪽</span></div>
-        </div>
-      </div>
-
-      <!-- 지금 안내 -->
-      <div class="now-card" aria-live="assertive" aria-atomic="true">
-        <span class="now-label">지금 안내</span>
-        <p id="command">출발 위치를 고르세요.</p>
-        <div class="now-meta">
-          <span id="meta-exit">목표 —</span>
-          <span id="meta-steps">—</span>
-          <span id="meta-ms">—</span>
-        </div>
-      </div>
-
-      <section id="free-move-card" class="step-card free-move-card" hidden>
-        <h2>테스트 인물 자유 이동</h2>
-        <p class="hint">버튼 한 번은 실제 한 걸음입니다. 지도에서 사람을 드래그하면 원하는 위치로 바로 옮길 수도 있습니다.</p>
-        <div class="move-pad" role="group" aria-label="테스트 인물 8방향 이동">
-          <button type="button" data-move-x="-1" data-move-y="-1">왼쪽 위</button>
-          <button type="button" data-move-x="0" data-move-y="-1">위</button>
-          <button type="button" data-move-x="1" data-move-y="-1">오른쪽 위</button>
-          <button type="button" data-move-x="-1" data-move-y="0">왼쪽</button>
-          <span class="move-pad-center">한 걸음</span>
-          <button type="button" data-move-x="1" data-move-y="0">오른쪽</button>
-          <button type="button" data-move-x="-1" data-move-y="1">왼쪽 아래</button>
-          <button type="button" data-move-x="0" data-move-y="1">아래</button>
-          <button type="button" data-move-x="1" data-move-y="1">오른쪽 아래</button>
-        </div>
-        <p id="move-status" class="move-status" aria-live="polite">대피를 시작하면 자유 이동을 사용할 수 있습니다.</p>
-      </section>
-
-      <div class="actions">
-        <button id="btn-auto" class="big-btn secondary" disabled>자동으로 걷기</button>
-        <button id="btn-step" class="big-btn secondary" disabled>경로 따라 한 걸음</button>
-      </div>
-      <div class="actions">
-        <button id="btn-where" class="big-btn secondary" disabled>여기가 어디?</button>
-        <button id="btn-repeat" class="big-btn secondary">다시 듣기</button>
-      </div>
-
-      <button id="btn-reset" class="big-btn danger">처음부터</button>
-
-      <details class="more-links">
-        <summary>자세한 화면 열기</summary>
-        <a href="index.html">사용자 앱 (시각장애인용)</a>
-        <a href="admin.html">관제 대시보드 (연기·온도·센서)</a>
-        <a href="guardian.html">보호자 화면</a>
-        <a href="architect.html">도면·장소 편집기</a>
-      </details>
-    </aside>
+      <iframe id="frame-guardian" title="보호자 화면"></iframe>
+    </section>
   </div>
 
-  <script type="module" src="js/console.js"></script>
+  <details class="demo-log" open>
+    <summary>실시간 이벤트 로그 — 세 화면 사이에 오가는 신호</summary>
+    <ul id="event-log" class="list"><li class="empty">대기 중…</li></ul>
+  </details>
+
+  <script type="module" src="js/demo.js"></script>
 </body>
 </html>

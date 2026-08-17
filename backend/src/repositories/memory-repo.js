@@ -46,8 +46,6 @@ export class MemoryRepo {
     this.planImages = new Map(); // planId -> data URI
     this.activePlanId = null;
     this.sensors = new Map();   // sensorId -> 온도 판독값
-    this.fires = new Map();     // fireId -> 화재 발생 지점
-    this.fireSeq = 1;
   }
 
   async init() {
@@ -127,11 +125,10 @@ export class MemoryRepo {
     if (!this.plans.has(planId)) return null;
     this.activePlanId = planId;
     this._persist();
-    // 도면이 바뀌면 이전 도면의 통로 ID·좌표로 걸려 있던 위험은 의미가 없다
+    // 도면이 바뀌면 이전 도면의 통로 ID로 걸려 있던 위험은 의미가 없다
     await this.resetHazards();
     this.sensors.clear();
     publish('sensors', await this.getSensors());
-    await this.clearFires();
     publish('plan', await this.getActivePlan());
     return this.plans.get(planId);
   }
@@ -189,37 +186,6 @@ export class MemoryRepo {
   async clearSensors() {
     this.sensors.clear();
     publish('sensors', await this.getSensors());
-  }
-
-  // ------------------------------------------------------------------ fires
-  async getFires() {
-    return [...this.fires.values()];
-  }
-
-  async addFire({ x, y, radius, label }) {
-    const doc = { id: `F${this.fireSeq++}`, x, y, radius, label, startedAt: Date.now() };
-    this.fires.set(doc.id, doc);
-    publish('fires', await this.getFires());
-    return doc;
-  }
-
-  async updateFire(fireId, patch) {
-    const fire = this.fires.get(fireId);
-    if (!fire) return null;
-    const doc = { ...fire, ...patch };
-    this.fires.set(fireId, doc);
-    publish('fires', await this.getFires());
-    return doc;
-  }
-
-  async removeFire(fireId) {
-    this.fires.delete(fireId);
-    publish('fires', await this.getFires());
-  }
-
-  async clearFires() {
-    this.fires.clear();
-    publish('fires', await this.getFires());
   }
 
   // -------------------------------------------------------------------- sos

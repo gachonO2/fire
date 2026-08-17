@@ -10,7 +10,7 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>보호자 화면</h1>
+    <h1>👨‍👩‍👧 보호자 화면</h1>
     <span id="mode-badge" class="badge">연결 중…</span>
   </header>
 
@@ -32,11 +32,7 @@
     </section>
 
     <section class="kpis" aria-label="대피 상황">
-      <div class="kpi wide">
-        <span class="kpi-label">현재 위치</span>
-        <strong id="g-location">-</strong>
-        <span id="g-place-desc" class="kpi-sub"></span>
-      </div>
+      <div class="kpi wide"><span class="kpi-label">현재 위치</span><strong id="g-location">-</strong></div>
       <div class="kpi"><span class="kpi-label">목표 출구</span><strong id="g-exit">-</strong></div>
       <div class="kpi"><span class="kpi-label">다음 지점까지</span><strong id="g-steps">-</strong></div>
       <div class="kpi"><span class="kpi-label">위치 확신도</span><strong id="g-conf">-</strong></div>
@@ -51,7 +47,7 @@
     <section class="map-wrap">
       <h3>층 지도</h3>
       <svg id="guardian-map" class="minimap" role="img" aria-label="대피자 위치 지도"></svg>
-      <p class="hint">파란색은 대상자 위치, 초록색은 안내 경로, 빨간색은 위험 통로입니다.</p>
+      <p class="hint">🔵 대상자 위치 · 🟢 안내 중인 경로 · 🔴 위험 통로</p>
     </section>
 
     <section class="panel" style="margin-top:14px">
@@ -59,7 +55,7 @@
       <ul id="g-alerts" class="list"><li class="empty">아직 없음</li></ul>
     </section>
 
-    <button id="btn-notify" class="big-btn secondary">알림 허용</button>
+    <button id="btn-notify" class="big-btn secondary">🔔 알림 허용</button>
   </main>
 
   <script type="module" src="js/guardian.js"></script>

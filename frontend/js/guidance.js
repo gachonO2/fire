@@ -24,9 +24,6 @@ const VIBRATION = {
   danger:   [400, 150, 400, 150, 400],
   sos:      [1000, 250, 1000],
   arrive:   [250, 120, 250, 120, 700],
-  // 자동 화재 경보 — 다른 어떤 신호와도 헷갈리지 않게 길고 반복적으로
-  alarm:    [500, 200, 500, 200, 500, 200, 900],
-  training: [300, 160, 300],
 };
 
 export class Guidance {
@@ -43,11 +40,9 @@ export class Guidance {
     }
   }
 
-  speak(text, { interrupt = true, remember = true } = {}) {
-    if (remember) {
-      this.lastText = text;
-      if (this.onAnnounce) this.onAnnounce(text);
-    }
+  speak(text, { interrupt = true } = {}) {
+    this.lastText = text;
+    if (this.onAnnounce) this.onAnnounce(text);
     if (!('speechSynthesis' in window)) return;
     if (interrupt) speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
@@ -64,28 +59,7 @@ export class Guidance {
   // ------------------------------------------------ 6개 명령
   cmdStart(exitName) {
     this.vibrate('start');
-    this.speak(`대피 모드를 시작합니다. 목표는 ${exitName}입니다. 구조가 필요하면 볼륨 올리기 버튼을 빠르게 세 번 누르세요.`);
-  }
-
-  /**
-   * 화재 자동 감지 경보 — 사용자가 아무것도 누르지 않았는데 울린다.
-   * 그래서 다른 안내와 확실히 구분되는 긴 경보 진동을 먼저 주고,
-   * "불이 났다 → 어디에 났다 → 이제 안내한다" 순서로 말한다.
-   */
-  cmdAlarm(whereText) {
-    if (navigator.vibrate) navigator.vibrate(VIBRATION.alarm);
-    this.speak(`화재가 발생했습니다. ${whereText} 지금부터 대피를 안내합니다.`);
-  }
-
-  /** 위치를 모르는 상태의 경보. 경로 안내나 자동 구조요청을 시작한다고 말하지 않는다. */
-  cmdAlarmNeedsLocation(whereText) {
-    if (navigator.vibrate) navigator.vibrate(VIBRATION.alarm);
-    this.speak(`화재가 감지되었습니다. ${whereText} 현재 위치를 먼저 확인해야 합니다. 벽의 안내 태그나 QR을 확인하세요.`);
-  }
-
-  cmdTrainingAlarm(whereText) {
-    if (navigator.vibrate) navigator.vibrate(VIBRATION.training);
-    this.speak(`가상 화재 훈련입니다. 실제 화재가 아닙니다. ${whereText} 대피 훈련을 시작합니다.`);
+    this.speak(`대피 모드를 시작합니다. 목표는 ${exitName}입니다.`);
   }
 
   cmdStraight(steps, wall) {
@@ -105,12 +79,6 @@ export class Guidance {
   cmdStop(reason) {
     this.vibrate('stop');
     this.speak(`멈추세요. ${reason || ''}`.trim());
-  }
-
-  /** 잘못된 방향에서는 금속탐지기식 방향 신호를 끊는다. */
-  cmdWrongWay(reason) {
-    navigator.vibrate?.(0);
-    this.speak(`멈추세요. ${reason || '방향 신호를 다시 찾으세요.'}`.trim());
   }
 
   cmdDanger(text) {

@@ -31,7 +31,6 @@ streamRoutes.get('/stream', async (req, res) => {
     hazards: h => h,   // 지도를 그리려면 위험 상태는 필요하다
     plan: p => p,
     sensors: s => s,
-    fires: f => f,
     positions: list => (watchedUserId ? mine(list) : list),
     sos: list => (watchedUserId ? mine(list) : list),
     alerts: list => (watchedUserId ? mine(list) : list),
@@ -66,7 +65,6 @@ streamRoutes.get('/stream', async (req, res) => {
   send('plan', await repo.getActivePlan());
   await sendMergedHazards();
   send('sensors', annotate(await repo.getSensors()));
-  send('fires', await repo.getFires());
   send('sos', await repo.getSOS());
   send('positions', await repo.getPositions());
   send('metrics', await repo.getMetrics());
@@ -77,7 +75,6 @@ streamRoutes.get('/stream', async (req, res) => {
     handlers[topic] =
       topic === 'hazards' ? () => sendMergedHazards()
       : topic === 'sensors' ? data => { send('sensors', annotate(data)); sendMergedHazards(); }
-      : topic === 'fires' ? data => { send('fires', data); sendMergedHazards(); }
       : data => send(topic, data);
     events.on(topic, handlers[topic]);
   }

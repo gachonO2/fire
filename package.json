@@ -6,8 +6,7 @@
   "description": "시각장애인 실내 대피 AI 내비게이션 (MVP)",
   "workspaces": ["backend"],
   "scripts": {
-    "dev": "npm run sync && node scripts/start-all.mjs",
-    "dev:frontend": "node scripts/dev-server.mjs",
+    "dev": "node scripts/dev-server.mjs",
     "dev:backend": "node --watch backend/src/server.js",
     "sync": "node scripts/sync-shared.mjs",
     "start": "npm run sync && node backend/src/server.js",
