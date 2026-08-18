@@ -35,6 +35,13 @@ export const config = {
   // 이보다 확신이 낮은 탐지는 버린다. 서비스 쪽 문턱(DETECT_CONF)보다 뒤에 걸리는
   // 2차 문턱이라, 모델을 다시 안 띄우고도 여기서 조일 수 있다.
   detectorMinConfidence: Number(process.env.DETECTOR_MIN_CONFIDENCE) || 0.3,
+  // OpenAI 규격 게이트웨이 (monogpt/MonoRouter, OpenRouter, 자체 프록시 등).
+  //
+  // Anthropic 규격을 흉내 내는 게이트웨이도 있지만, MonoRouter 처럼 **OpenAI
+  // 규격만** 여는 곳이 있다. 그쪽으로 Anthropic 형식을 보내면 404 가 난다.
+  openaiBaseUrl: (process.env.OPENAI_BASE_URL || '').replace(/\/+$/, ''),
+  openaiApiKey: process.env.OPENAI_API_KEY || '',
+  openaiModel: process.env.OPENAI_MODEL || 'gemini-3.5-flash',
 };
 
 /** 서비스 계정이 준비된 경우에만 Firestore를 쓴다. 아니면 인메모리 데모 모드. */

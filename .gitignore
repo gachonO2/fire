@@ -23,3 +23,13 @@ ml/detector/outputs/
 # 코랩 업로드용으로 묶은 임시 꾸러미
 ml-colab.zip
 evacuation_mvp_full_with_models.zip
+.gstack/
+
+# BLE 답사 도구용 파이썬 환경 (scripts/scan-beacons.py)
+.venv/
+beacon-survey.json
+beacon-discovery.json
+backend/.env
+
+__pycache__/
+walk-log.jsonl

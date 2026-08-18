@@ -10,6 +10,8 @@
  */
 
 import { Api } from './api.js';
+import { LiveTrack } from './live-track.js';
+import { drawBeacons, drawFoundBeacons, startBeaconWaves } from './beacon-layer.js';
 import { renderMap, temperatureColor } from './minimap.js';
 import { TEMP } from '../shared/hazard-rules.js';
 
@@ -17,15 +19,20 @@ const $ = id => document.getElementById(id);
 
 const api = new Api();
 let hazards = {};
+let foundBeacons = [];
 let sensors = [];
 let positions = [];
+let live = null;
 let currentTool = 'smoke';
 
 async function main() {
-  document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
+  document.querySelectorAll('.tool[data-tool]').forEach(btn => {
     btn.addEventListener('click', () => {
       currentTool = btn.dataset.tool;
-      document.querySelectorAll('.tool-btn[data-tool]').forEach(b =>
+      const label = { fire: '화재', smoke: '연기', crowd: '혼잡', temp: '온도', clear: '해제' }[currentTool];
+      const badge = document.getElementById('map-mode');
+      if (badge && label) badge.textContent = label;
+      document.querySelectorAll('.tool[data-tool]').forEach(b =>
         b.setAttribute('aria-pressed', String(b === btn)));
       $('temp-controls').hidden = currentTool !== 'temp';
     });
@@ -43,8 +50,25 @@ async function main() {
 
   api.on('status', ({ online, storage }) => {
     $('mode-badge').textContent = online ? storage : '서버 연결 끊김';
-    $('mode-badge').classList.toggle('offline', !online);
+    $('mode-badge').classList.toggle('off', !online);
   });
+
+  live = new LiveTrack(document.getElementById('live-layer'), () => ({
+    baseSvg: document.getElementById('admin-map'),
+    floorPlan: api.floorPlan,
+  }));
+  live.start();
+
+  ['show-beacons', 'show-range'].forEach(id =>
+    document.getElementById(id)?.addEventListener('change', draw));
+  startBeaconWaves(document.getElementById('beacon-waves'), () => ({
+    baseSvg: document.getElementById('admin-map'),
+    floorPlan: api.floorPlan,
+    enabled: (document.getElementById('show-beacons')?.checked ?? true)
+      && (document.getElementById('show-waves')?.checked ?? true),
+    // 사람이 있는 곳의 비콘만 울린다 — 전부 울리면 정보가 아니라 소음이다
+    near: positions.filter(p => Number.isFinite(p?.x)),
+  }));
 
   api.on('plan', plan => {
     $('building-info').textContent =
@@ -54,6 +78,9 @@ async function main() {
 
   api.on('hazards', h => { hazards = h; draw(); });
 
+  // 걸으면서 찾아낸 비콘 — 맥 스캐너가 올린 관측을 서버가 폰 위치와 짝지은 결과
+  api.on('beaconMap', list => { foundBeacons = list || []; draw(); });
+
   api.on('sensors', list => {
     sensors = list;
     renderSensors(list);
@@ -61,6 +88,7 @@ async function main() {
   });
 
   api.on('sos', list => {
+    window.__sosCount = list.length;
     renderList($('sos-list'), list, s => {
       // 구조대가 보호자에게 바로 연락할 수 있도록 등록된 연락처를 함께 띄운다
       const guardian = s.guardianName
@@ -74,6 +102,7 @@ async function main() {
 
   api.on('positions', list => {
     positions = list;
+    live?.update(list);
     renderList($('pos-list'), list, p => {
       const phase = { guiding: '대피 중', arrived: '대피 완료 ✅', safehold: '안전상태 🆘', idle: '대기' }[p.phase] || p.phase;
       return `<strong>${p.nodeName ?? p.nodeId}</strong> — ${phase}
@@ -83,6 +112,9 @@ async function main() {
   });
 
   api.on('metrics', list => {
+    const last = list[list.length - 1];
+    const el = document.getElementById('stat-recalc');
+    if (el && last) el.textContent = `${Math.round(last.ms)}ms`;
     renderList($('metric-list'), list, m => {
       const kind = m.kind === 'reroute' ? '재탐색' : '최초 계산';
       const ok = m.ms <= 2000 ? '✅' : '⚠️';
@@ -104,10 +136,33 @@ function draw() {
     backgroundImage: api.backgroundImage,
     hazards,
     sensors,
-    positions,
+    positions: [],   // 점은 live-track 레이어가 부드럽게 그린다
     onEdgeClick: edge => applyTool({ edge }),
     onNodeClick: node => { if (currentTool === 'temp') applyTool({ node }); },
   });
+
+  // 비콘 — 어디에 깔려 있는지 보여야 "왜 저기서 위치가 잡히나"가 이해된다
+  if (api.floorPlan && document.getElementById('show-beacons')?.checked) {
+    drawBeacons(document.getElementById('admin-map'), api.floorPlan, {
+      showRange: document.getElementById('show-range')?.checked ?? false,
+    });
+    // 찾아낸 실물 비콘은 그 위에 얹는다 (초록 — 추정치라 확정 비콘과 구분한다)
+    drawFoundBeacons(document.getElementById('admin-map'), api.floorPlan, foundBeacons);
+  }
+  updateStats();
+}
+
+/** 상단 숫자 네 개 — 시연에서 상황이 한눈에 읽혀야 하는 줄 */
+function updateStats() {
+  const blocked = Object.keys(hazards || {}).length;
+  const walking = positions.filter(p => p.phase === 'guiding').length;
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('stat-people', walking);
+  set('stat-hazards', blocked);
+  set('stat-sos', (window.__sosCount ?? 0));
+  set('n-people', positions.length);
+  set('n-sos', (window.__sosCount ?? 0));
+  set('n-sensors', (sensors || []).length);
 }
 
 /** 선택된 도구를 통로/지점에 적용한다 */

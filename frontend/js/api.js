@@ -38,7 +38,7 @@ export class Api {
     this.storage = '연결 중…';
     this.listeners = {
       hazards: [], sos: [], positions: [], metrics: [],
-      alerts: [], sensors: [], plan: [], status: [],
+      alerts: [], sensors: [], plan: [], status: [], beaconMap: [],
     };
     this._es = null;
 
@@ -109,7 +109,7 @@ export class Api {
     const es = new EventSource(url);
     this._es = es;
 
-    for (const topic of ['hazards', 'sos', 'positions', 'metrics', 'alerts', 'sensors', 'plan']) {
+    for (const topic of ['hazards', 'sos', 'positions', 'metrics', 'alerts', 'sensors', 'plan', 'beaconMap']) {
       es.addEventListener(topic, e => {
         const data = JSON.parse(e.data);
         if (topic === 'hazards') {
@@ -136,6 +136,9 @@ export class Api {
   }
 
   on(topic, cb) {
+    // 목록에 없는 주제로 구독해도 화면이 죽지 않게 한다. 새 주제를 추가하면서
+    // 여기 넣는 것을 빠뜨렸다가 관제가 통째로 멈춘 적이 있다.
+    if (!this.listeners[topic]) this.listeners[topic] = [];
     this.listeners[topic].push(cb);
     if (topic === 'hazards' && Object.keys(this.hazards).length) {
       queueMicrotask(() => cb(this.hazards));
@@ -146,7 +149,10 @@ export class Api {
   }
 
   _emit(topic, data) {
-    this.listeners[topic].forEach(cb => cb(data));
+    for (const cb of this.listeners[topic] || []) {
+      // 구독자 하나가 던져도 나머지는 받아야 한다
+      try { cb(data); } catch (e) { console.warn(`[api] ${topic} 처리 실패`, e); }
+    }
   }
 
   // ---------------------------------------------------------------- 경로

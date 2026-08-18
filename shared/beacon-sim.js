@@ -19,6 +19,18 @@ export const SIM_DEFAULTS = {
   noiseDb: 6,       // 균등 노이즈 진폭(±dB) — 실내 실측 수준
   rangeM: 25,       // 수신 한계 거리 — BLE 비콘 실내 실효 범위
   dropRate: 0.15,   // 광고 패킷 유실률 — 스캔 주기와 어긋나 못 받는 몫
+
+  // 인체 차폐 — 2.4GHz 는 물에 잘 흡수된다. 폰과 비콘 사이에 사람이 있으면 깎인다.
+  // 제자리에 서서 몸만 돌려도 추정 거리가 몇 배로 뛰는 원인이고, 이게 빠지면
+  // 시뮬레이션이 실제보다 한참 낙관적으로 나온다.
+  bodyBlockRate: 0.3,
+  bodyBlockDb: 14,
+
+  // 벽 관통 손실 — 콘크리트 벽 하나에 10~15dB.
+  // 직선거리만 쓰면 "벽 너머 3m"와 "복도 3m"가 같은 세기가 되어, 실제로는
+  // 안 잡히는 비콘이 시뮬레이션에서는 1등이 된다. 배치 개수 판단이 통째로 틀어진다.
+  wallLossDb: 12,
+  wallDetourRatio: 1.6,  // 걸어서 가는 거리가 직선의 이 배를 넘으면 사이에 벽이 있다고 본다
 };
 
 /**
@@ -30,9 +42,11 @@ export const SIM_DEFAULTS = {
  * @returns {Array<{beaconId, rssi, ts}>}
  */
 export function simulateScan(floorPlan, pos, now, opts = {}) {
-  const { txPower, pathLossExp, noiseDb, rangeM, dropRate } = { ...SIM_DEFAULTS, ...opts };
+  const cfg = { ...SIM_DEFAULTS, ...opts };
+  const { txPower, pathLossExp, noiseDb, rangeM, dropRate } = cfg;
   const rng = opts.rng ?? Math.random;
   const scans = [];
+  const walk = opts.walkDistance ?? walkDistanceFrom(floorPlan, pos);
 
   for (const node of floorPlan.beaconNodes()) {
     const meters = Math.hypot(node.x - pos.x, node.y - pos.y) * floorPlan.metersPerUnit;
@@ -40,12 +54,67 @@ export function simulateScan(floorPlan, pos, now, opts = {}) {
     if (rng() < dropRate) continue;
 
     // 로그-거리 모델. 0.5m 미만은 근거리 왜곡이 심해 하한을 둔다
-    const rssi = txPower
+    let rssi = txPower
       - 10 * pathLossExp * Math.log10(Math.max(meters, 0.5))
       + (rng() * 2 - 1) * noiseDb;
+
+    // 벽 — 걸어서 돌아가야 하는 거리가 직선보다 훨씬 길면 사이가 막혀 있다는 뜻이다.
+    // 도면에 벽 다각형이 없어도 그래프만으로 근사할 수 있다.
+    const detour = walk.get(node.id);
+    if (Number.isFinite(detour) && meters > 1 && detour / meters > cfg.wallDetourRatio) {
+      const walls = Math.min(3, Math.floor(detour / meters / cfg.wallDetourRatio));
+      rssi -= cfg.wallLossDb * walls;
+    }
+
+    // 사람 몸이 가리는 경우
+    if (rng() < cfg.bodyBlockRate) rssi -= cfg.bodyBlockDb;
+
+    if (rssi < -95) continue;   // 너무 약하면 아예 안 잡힌다
     scans.push({ beaconId: node.beaconId, rssi: Math.round(rssi * 10) / 10, ts: now });
   }
   return scans;
+}
+
+/**
+ * 현재 위치에서 각 비콘 노드까지 **걸어서 가는 거리**(m).
+ *
+ * 직선거리와 비교해 「사이에 벽이 있나」를 가늠하는 데 쓴다. 복도를 따라 크게
+ * 돌아가야 하는 곳은 대개 벽이 막고 있는 곳이다 — 도면에 벽 정보가 없어도
+ * 그래프의 연결 관계만으로 그 사실을 알 수 있다.
+ */
+function walkDistanceFrom(floorPlan, pos) {
+  const nodes = floorPlan.nodes;
+  const mpu = floorPlan.metersPerUnit;
+  const adj = new Map(nodes.map(n => [n.id, []]));
+  for (const e of floorPlan.edges) {
+    const a = floorPlan.getNode(e.a), b = floorPlan.getNode(e.b);
+    if (!a || !b) continue;
+    const w = Math.hypot(b.x - a.x, b.y - a.y) * mpu;
+    adj.get(e.a)?.push([e.b, w]);
+    adj.get(e.b)?.push([e.a, w]);
+  }
+
+  // 사용자와 제일 가까운 노드에서 출발해 다익스트라
+  let start = null, sd = Infinity;
+  for (const n of nodes) {
+    const d = Math.hypot(n.x - pos.x, n.y - pos.y) * mpu;
+    if (d < sd) { sd = d; start = n; }
+  }
+  const dist = new Map(nodes.map(n => [n.id, Infinity]));
+  if (!start) return dist;
+  dist.set(start.id, sd);
+
+  const seen = new Set();
+  while (seen.size < nodes.length) {
+    let cur = null, best = Infinity;
+    for (const [id, d] of dist) if (!seen.has(id) && d < best) { best = d; cur = id; }
+    if (cur === null) break;
+    seen.add(cur);
+    for (const [next, w] of adj.get(cur) || []) {
+      if (best + w < dist.get(next)) dist.set(next, best + w);
+    }
+  }
+  return dist;
 }
 
 /**

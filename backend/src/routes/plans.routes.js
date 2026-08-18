@@ -270,6 +270,32 @@ planRoutes.get('/plans/:planId/image', async (req, res) => {
 });
 
 /** body: { dataUri } — 편집기가 축소·압축해서 보낸 도면 이미지 */
+/**
+ * 축척만 고친다 - 걸어서 잰 값을 앱이 바로 올린다.
+ *
+ * 도면 전체를 다시 올리게 하면 45개 지점을 통째로 왕복시켜야 하고, 그 사이에
+ * 편집기에서 고친 내용과 부딪힌다. 숫자 하나 고치는 데 그럴 이유가 없다.
+ *
+ * 축척은 **사람이 재서 넣는 유일한 값**이다(`planReader` 가 판독하지 않는다).
+ * 두 배 틀리면 "8미터 직진"이 16미터가 되고, 시각장애인은 그 걸음 수를 믿고
+ * 걷다가 모퉁이를 지나친다.
+ */
+planRoutes.put('/plans/:planId/scale', requireAdmin, async (req, res) => {
+  const v = Number(req.body?.metersPerUnit);
+  if (!(v > 0) || !Number.isFinite(v)) {
+    return res.status(400).json({ error: 'metersPerUnit 은 0보다 큰 수여야 합니다.' });
+  }
+  const repo = await getRepo();
+  const plan = await repo.getPlan(req.params.planId);
+  if (!plan) return res.status(404).json({ error: '도면을 찾을 수 없습니다.' });
+
+  await repo.savePlan({
+    ...plan, metersPerUnit: v, scaleEstimated: false,
+    scaleNote: req.body?.note || null,
+  });
+  res.json({ ok: true, metersPerUnit: v, widthM: (plan.image?.width || 0) * v });
+});
+
 planRoutes.put('/plans/:planId/image', requireAdmin, async (req, res) => {
   const { dataUri } = req.body || {};
   if (!dataUri?.startsWith('data:image/')) {
