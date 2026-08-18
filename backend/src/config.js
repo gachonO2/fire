@@ -28,6 +28,13 @@ export const config = {
   // 모델 이름을 따로 둔 이유: 게이트웨이용 PLAN_READER_MODEL 이 남아 있어도 섞이지 않게.
   googleApiKey: process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || '',
   googleModel: process.env.GOOGLE_MODEL || 'gemini-3.5-flash',
+
+  // 도면 기호 탐지기 (ml/detector — 직접 학습시킨 YOLO 가중치).
+  // 안 떠 있으면 판독이 언어모델만으로 돌아간다. 꺼져 있다고 도면 등록이 막히지는 않는다.
+  detectorUrl: (process.env.DETECTOR_URL || 'http://127.0.0.1:8001').replace(/\/+$/, ''),
+  // 이보다 확신이 낮은 탐지는 버린다. 서비스 쪽 문턱(DETECT_CONF)보다 뒤에 걸리는
+  // 2차 문턱이라, 모델을 다시 안 띄우고도 여기서 조일 수 있다.
+  detectorMinConfidence: Number(process.env.DETECTOR_MIN_CONFIDENCE) || 0.3,
 };
 
 /** 서비스 계정이 준비된 경우에만 Firestore를 쓴다. 아니면 인메모리 데모 모드. */

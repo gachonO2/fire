@@ -70,7 +70,12 @@ async function main() {
             : `판독을 쓸 수 없습니다.\n${r.reason}`,
           true,
         );
+        return;
       }
+      // 엔진이 둘 다 붙었는지 미리 알려준다. 한쪽만 있으면 결과의 성격이 달라지는데
+      // (탐지기만 = 통로가 추정, 언어모델만 = 좌표가 눈대중) 다 읽고 나서 알면
+      // 이미 검수 방식을 정한 뒤다.
+      setAiStatus(`판독 엔진: ${r.engine}\n${r.reason}`, !(r.detector?.ok && r.model?.ok));
     })
     .catch(() => {});
   $('floor-width').addEventListener('input', recomputeScale);
@@ -202,6 +207,7 @@ async function readPlanWithAi() {
     setAiStatus(
       [
         `지점 ${draft.nodes.length}개 · 통로 ${draft.edges.length}개 · 출구 ${exits}곳을 읽었습니다.`,
+        draft.engine ? `엔진: ${draft.engine}` : '',
         CONFIDENCE_NOTE[draft.confidence] || '',
         draft.notes,
         ...(draft.warnings || []),
@@ -552,7 +558,7 @@ async function refreshPlanList() {
       <strong>${escapeHtml(p.name)}</strong>
       ${p.active ? '<span class="badge-active">사용 중</span>' : ''}
       ${p.draft ? '<span class="badge-active" style="background:#f59e0b;color:#1f2937">📱 앱에서 접수 · 확인 필요</span>' : ''}
-      <div class="time">${p.id} · 지점 ${p.nodeCount} · 통로 ${p.edgeCount}${p.hasImage ? ' · 도면 이미지 있음' : ''}${p.draft && p.readConfidence ? ` · 판독 신뢰도 ${p.readConfidence}` : ''}</div>
+      <div class="time">${p.id} · 지점 ${p.nodeCount} · 통로 ${p.edgeCount}${p.hasImage ? ' · 도면 이미지 있음' : ''}${p.draft && p.readConfidence ? ` · 판독 신뢰도 ${p.readConfidence}` : ''}${p.draft && p.readEngine ? ` · ${escapeHtml(p.readEngine)}` : ''}</div>
       <div class="actions-inline">
         <button class="tool-btn" data-load="${p.id}">${p.draft ? '확인하기' : '불러오기'}</button>
         ${p.active || p.draft ? '' : `<button class="tool-btn" data-activate="${p.id}">사용하기</button>`}

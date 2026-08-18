@@ -202,6 +202,40 @@ POST /api/plans/draft   { name, dataUri, width, height, widthM, northOffset? }
 지점을 찍는 일은 없던 정보를 만드는 게 아니라, 그림으로만 있는 것을 좌표로
 **옮겨 적는** 작업이다. 그 옮겨 적기를 AI 에게 시킬 수 있다.
 
+여기에는 성격이 다른 두 모델이 쓰이고, **각자 잘하는 것만** 한다.
+
+| | 기호 탐지기 ([ml/detector](ml/detector/)) | 언어모델 (Gemini · Claude) |
+|---|---|---|
+| 하는 일 | 비상구·계단·실·문이 **어디 있는지** | 적힌 **이름**과 **통로 연결** |
+| 방식 | 피난안내도로 직접 학습시킨 YOLO 두 벌 | 도면의 복도 선·초록 피난경로 화살표를 읽음 |
+| 못 하는 것 | 글자를 못 읽고 통로도 모름 | 좌표가 눈대중이라 몇십 px 씩 어긋남 |
+
+그래서 **좌표는 탐지기, 이름과 통로는 언어모델**로 나눈다. 언어모델에 보내는
+지시문에서 좌표를 다시 묻지 않는 것이 핵심이다 — 다시 말하게 하면 더 나빠진다.
+
+한쪽만 있어도 돌아가고, 편집기가 어느 조합으로 읽었는지 화면에 밝힌다.
+
+| 붙어 있는 것 | 결과 |
+|---|---|
+| 둘 다 | 탐지기가 찍은 지점 위에 언어모델이 이름·통로를 얹는다 (가장 정확) |
+| 탐지기만 | 지점은 정확, 통로는 기하학적 추정, 이름은 번호 (`실 1`, `비상구 2`…) |
+| 언어모델만 | 좌표까지 언어모델이 읽는다 |
+| 둘 다 없음 | 판독을 시작하지 않고 손으로 그리기로 넘어간다 |
+
+**기호 탐지기** (없어도 도면 등록은 그대로 된다):
+
+```bash
+cd ml/detector
+python -m venv .venv && .venv\Scripts\activate   # macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app:app --port 8001
+```
+
+가중치·클래스 표·설정은 [ml/detector/README.md](ml/detector/README.md).
+백엔드 쪽 주소는 `backend/.env` 의 `DETECTOR_URL`.
+
+**언어모델** (선택):
+
 ```bash
 # backend/.env — 둘 중 하나만 있으면 된다 (Google 이 있으면 그쪽이 우선)
 GOOGLE_API_KEY=...                  # aistudio.google.com/apikey (무료)
@@ -213,10 +247,17 @@ PLAN_READER_MODEL=claude-opus-5     # 생략 가능
 
 **Google 직접 연결을 권한다.** 게이트웨이를 거치면 이미지가 버려질 수 있기 때문이다(아래 참조).
 
-키를 넣으면 편집기 1단계에 **"✨ 도면에서 자동으로 읽어오기"** 버튼이 생긴다
-(키가 없으면 버튼 자체가 안 보이고, 손으로 그리기는 그대로 된다).
+둘 중 하나라도 붙으면 편집기 1단계에 **"✨ 도면에서 자동으로 읽어오기"** 버튼이 생긴다
+(둘 다 없으면 버튼 자체가 안 보이고, 손으로 그리기는 그대로 된다).
 
 도면 하나에 **10분 → 1분**이 된다.
+실제 사진(AI공학관 3층, 1100×744)으로 CPU 3.5초에 지점 16곳·통로 16개 — 손으로 찍었던 15곳과 비슷한 수다.
+
+**통로 추정에서 지키는 것 하나** — 탐지기 단독으로 통로를 만들 때, 실(방) 사각형을
+가로지르는 연결은 거부한다. 방은 벽으로 둘러싸인 공간이라 그 안을 관통하는 복도는 없다.
+이 규칙 하나로 "직선거리가 가까워 이었는데 사이에 교실이 있는" 연결이 걸러진다.
+끊긴 곳은 벽을 뚫어 잇지 **않고** 끊겼다고 알린다 — 없는 통로를 만들면
+시각장애인이 벽으로 걸어간다.
 
 **결과는 저장되지 않는다 — 편집기에 올라올 뿐이다.** 비상구를 하나 잘못 찍으면
 시각장애인이 벽으로 걸어가므로, 사람이 눈으로 확인하고 저장 버튼을 눌러야 들어간다.
@@ -233,8 +274,8 @@ PLAN_READER_MODEL=claude-opus-5     # 생략 가능
 
 ```
 POST /api/plans/read   { dataUri, width, height }
-  → { nodes, edges, confidence, notes, warnings, buildingName, floorLabel }
-GET  /api/plans/reader → { configured, available, reason }
+  → { nodes, edges, confidence, engine, notes, warnings, buildingName, floorLabel }
+GET  /api/plans/reader → { configured, available, engine, detector, model, reason }
 ```
 
 ### 게이트웨이를 쓴다면 — 시야 점검이 먼저 돈다
@@ -442,10 +483,20 @@ backend/
 │   ├── floor.js            활성 도면 + 통합 위험 상태 (관제 + 센서)
 │   ├── events.js           내부 이벤트 허브 → SSE
 │   ├── guardian-code.js    보호자 공유 코드 생성
+│   ├── planReader.js       도면 판독 — 탐지기와 언어모델을 합치는 이음매
+│   ├── planReader/
+│   │   ├── detector.js     ml/detector 호출 (꺼져 있으면 null, 예외 아님)
+│   │   ├── graph.js        탐지 상자 → 지점·통로 (실을 관통하는 연결은 거부)
+│   │   └── providers.js    Anthropic 규격 · Google 직접 연결
 │   ├── middleware/auth.js  관제 토큰 검증
 │   ├── repositories/       FirestoreRepo | MemoryRepo (동일 인터페이스)
 │   └── routes/             evacuation · hazards · sensors · plans · telemetry · guardians · stream
 └── test/api.test.mjs       API 통합 테스트 56종
+
+ml/detector/                ← 도면 기호 탐지 (파이썬 · 별도 프로세스)
+├── app.py                  FastAPI — /health · /detect
+├── hybrid_detector.py      두 모델 결과 합치기 + 클래스별 NMS
+└── models/*.pt             학습된 YOLO 가중치 두 벌
 
 frontend/
 ├── demo.html               통합 시연 (세 화면 + 이벤트 로그) ← 발표용
@@ -472,7 +523,9 @@ scripts/
 └── sync-shared.mjs         shared/ → frontend/shared/ 복사 (배포용)
 
 .vscode/launch.json         F5 실행 구성 (백엔드 · 각 테스트)
-test/route.test.mjs         경로탐색 시나리오 테스트 9종
+test/route.test.mjs         경로탐색 시나리오 테스트
+test/positioning.test.mjs   비콘 측위 — 깜빡임·전환 순서·순간이동 억제
+test/plan-reader.test.mjs   탐지 결과 → 그래프 (소화기 제외 · 실 관통 금지)
 vendor/                     참고한 오픈소스 원본 (MIT)
 ```
 
