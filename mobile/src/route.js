@@ -163,6 +163,34 @@ export class RouteFollower {
   }
 
   /** 사람이 읽을 진행 상황 */
+  /**
+   * 지금 서 있는 좌표 — 관제 지도에 점을 찍기 위한 것.
+   *
+   * 안내에는 「어느 구간 몇 걸음」만 있으면 되지만, 화면에 점을 찍으려면 좌표가
+   * 필요하다. 구간 양 끝 노드 사이를 걸음 비율만큼 보간한다.
+   *
+   * 이 값은 **추정치다.** 비콘이 노드를 확정해 주기 전까지는 걸음 수로 민 값이라
+   * 실제와 어긋날 수 있고, 그래서 함께 보내는 confidence 가 중요하다.
+   */
+  position() {
+    const s = this.segment();
+    if (!s?.from) {
+      const first = this._node.get(this.route?.nodes?.[0]);
+      return first ? { x: first.x, y: first.y, edgeId: null, progress: 0 } : null;
+    }
+    if (!s.to) return { x: s.from.x, y: s.from.y, edgeId: null, progress: 1 };
+
+    const t = Math.min(1, this.stepsTaken / Math.max(1, this.segmentSteps()));
+    return {
+      x: s.from.x + (s.to.x - s.from.x) * t,
+      y: s.from.y + (s.to.y - s.from.y) * t,
+      edgeId: this.route?.edges?.[this.index] ?? null,
+      fromNodeId: s.from.id,
+      toNodeId: s.to.id,
+      progress: t,
+    };
+  }
+
   describe() {
     const t = this.target;
     return {

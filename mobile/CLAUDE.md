@@ -148,6 +148,25 @@ BLE 스캔은 **Expo Go 에서 안 된다**(`react-native-ble-plx` + 개발 빌�
 | `src/alignment.js` | 촬영 정렬 판정(가속도계). 갤러리 사진 거친 필터 |
 | `src/fireServer.js` | 서버 연동 규격 |
 | `src/theme.js` | 색 토큰 |
+| `src/screens/MagScreen.js` | 지자기 재현성 검사 (측량하는 사람용 도구) |
+
+### `fire/shared/` 에서 내려오는 사본 — **여기서 고치지 말 것**
+
+아래는 `../fire/shared/` 가 원본이고 `npm run sync:app`(fire 쪽에서) 으로 복사된다.
+앱에서 고치면 다음 동기화에 덮인다. 원본을 고치고 다시 돌릴 것.
+
+| 파일 | 역할 |
+|---|---|
+| `src/floor-plan.js` | 도면 모델. 판단 계층이 쓰는 기하 계산(`edgeSteps`, `trueBearing`) |
+| `src/fusion.js` | **판단 계층.** 확정·이동·참고를 하나의 위치·확신도로 |
+| `src/beacon-anchor.js` | 비콘 판정 → 판단 계층 |
+| `src/altitude.js` | 기압 → 층 이동(엘리베이터/계단 구분) |
+| `src/altitude-anchor.js` | 층 이동 → 판단 계층 |
+| `src/magnetic.js` | 지자기 지문 대조 + 재현성 판정 |
+| `src/magnetic-anchor.js` | 지자기 → 판단 계층 (감점 + 누적 확정) |
+
+`positioning.js` 와 `pathfinding.js` 는 **이미 손으로 갈라진 상태**라 동기화 대상이
+아니다(메서드 이름부터 다르다: `setPlan` vs `setFloorPlan`). 합치는 일은 따로 해야 한다.
 
 ---
 

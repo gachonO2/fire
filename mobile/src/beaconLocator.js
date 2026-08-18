@@ -34,17 +34,56 @@ const WINDOW_MS = 3000;
  * 시뮬레이션에서 "실제로 서 있는 곳". 앱은 이 값을 보지 않고 **신호만 보고** 맞힌다.
  * 데모에서 다른 방에서 출발해 보려면 여기를 바꾸면 된다(지점 id 또는 null=첫 번째 방).
  */
+// 서버(/api/demo/stand)가 알려준다. 코드에 박지 않는다 — 시험할 때마다 파일을
+// 고치게 되고, 무엇보다 그 값이 진짜인 척하게 된다.
 let virtualStandNodeId = null;
 
 export function setVirtualStandNode(nodeId) { virtualStandNodeId = nodeId; }
 
+/**
+ * 시뮬레이션에서 서 있는 자리.
+ *
+ * 예전에는 **도면의 첫 번째 방**을 썼는데, COCONE 6층에서 하필 그 방이 비상구
+ * 바로 옆이었다. 경로가 «한 걸음»으로 나와 시작하자마자 도착 처리되고, 걸을
+ * 구간이 없어 위치가 한 자리에 못 박혔다. 비콘 매핑도 그 한 곳에만 90개가 쌓였다.
+ *
+ * 그래서 **출구에서 가장 먼 방**에서 시작한다. 시연이든 검증이든 하려는 일은
+ * "걸으면 위치가 따라오는가"인데, 걸을 거리가 없으면 아무것도 볼 수 없다.
+ */
+function farthestFromExit(nodes, edges) {
+  const adj = new Map(nodes.map(n => [n.id, []]));
+  for (const e of edges || []) {
+    adj.get(e.a)?.push(e.b);
+    adj.get(e.b)?.push(e.a);
+  }
+  // 출구들에서 동시에 퍼뜨려(다중 시작 BFS) 각 지점의 최단 거리를 잰다
+  const dist = new Map();
+  let front = nodes.filter(n => n.type === 'exit').map(n => n.id);
+  front.forEach(id => dist.set(id, 0));
+  for (let d = 1; front.length; d++) {
+    const next = [];
+    for (const id of front) {
+      for (const o of adj.get(id) || []) {
+        if (dist.has(o)) continue;
+        dist.set(o, d);
+        next.push(o);
+      }
+    }
+    front = next;
+  }
+  const rooms = nodes.filter(n => n.type === 'room');
+  const pool = rooms.length ? rooms : nodes;
+  return pool.reduce((best, n) =>
+    (dist.get(n.id) ?? -1) > (dist.get(best.id) ?? -1) ? n : best, pool[0]);
+}
+
 function standPosition(plan) {
   const nodes = plan?.nodes || [];
+  if (!nodes.length) return null;
   const node =
     nodes.find(n => n.id === virtualStandNodeId) ||
-    nodes.find(n => n.type === 'room') ||
-    nodes[0];
-  return node ? { x: node.x, y: node.y } : null;
+    farthestFromExit(nodes, plan.edges);
+  return node ? { x: node.x, y: node.y, id: node.id } : null;
 }
 
 /**
@@ -56,6 +95,22 @@ function standPosition(plan) {
  */
 function scanOnce(plan, now) {
   return simulateScan(plan, standPosition(plan), now);
+}
+
+/**
+ * 연속 스캔 — **안내 중에** 계속 위치를 확인하는 쪽(`GuideScreen`)이 쓴다.
+ *
+ * 예전에는 출발 지점을 잡을 때 한 번만 스캔하고 그 뒤로는 걸음만으로 밀었다.
+ * 비콘을 달아 놓고도 걷는 동안에는 안 쓰는 셈이라, 오차가 쌓여도 바로잡을 길이
+ * 없었다.
+ *
+ * @param {Object} plan
+ * @param {number} now
+ * @param {{x,y}} [simPos] **시뮬레이션 전용.** 가상 사용자가 지금 서 있는 좌표.
+ *   실기기 구현에서는 무시된다 — 진짜 전파에는 "어디서 쟀는지"를 넣을 수 없다.
+ */
+export function scanBeacons(plan, now, simPos = null) {
+  return simulateScan(plan, simPos || standPosition(plan), now);
 }
 
 /**

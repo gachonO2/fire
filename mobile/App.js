@@ -33,10 +33,12 @@ import AlarmScreen from './src/screens/AlarmScreen';
 import StartScreen from './src/screens/StartScreen';
 import SubmitScreen from './src/screens/SubmitScreen';
 import GuideScreen from './src/screens/GuideScreen';
+import MagScreen from './src/screens/MagScreen';
+import FieldScreen from './src/screens/FieldScreen';
 import { FireServer, mockFireEvent } from './src/fireServer';
 import { Api } from './src/api';
 import { locate, setLocator } from './src/locator';
-import { createBeaconLocator } from './src/beaconLocator';
+import { createBeaconLocator, setVirtualStandNode } from './src/beaconLocator';
 import { DEMO_PLAN } from './src/demoPlan';
 import { routeToNearestExit } from './src/pathfinding';
 import { resolveServerUrl } from './src/serverUrl';
@@ -65,6 +67,10 @@ setLocator(createBeaconLocator());
 const PHASE = {
   CAPTURE: 'capture', REVIEW: 'review', SUBMIT: 'submit',
   ALARM: 'alarm', START: 'start', GUIDE: 'guide',
+  // 지자기를 측위에 쓸 수 있는지 재보는 도구 화면. 대피 흐름과 무관하다.
+  MAGCHECK: 'magcheck',
+  // 보폭·층고·나침반 안정도를 실측하는 도구 화면.
+  FIELD: 'field',
 };
 
 export default function App() {
@@ -158,6 +164,14 @@ export default function App() {
           { force: true });
     }
 
+    // 시뮬레이션 출발점을 **위치 판정보다 먼저** 받아 온다.
+    //
+    // 처음에는 GuideScreen 이 받아왔는데, 위치 판정은 그보다 앞선 여기서 끝난다.
+    // 그래서 설정한 자리가 반영되지 않고 엉뚱한 곳에서 출발했다.
+    // (실물 매핑이 쌓이면 이 값은 안 쓰인다 — 그때는 전파가 위치를 말한다.)
+    const stand = await api.getStandNode?.().catch(() => null);
+    if (stand?.nodeId) setVirtualStandNode(stand.nodeId);
+
     // 위치는 **묻지 않고 알아낸다.** 불난 상황에 시각장애인에게 목록을 훑게 하는 건
     // 말이 안 된다. 비콘이 가장 세게 잡히는 지점이 곧 현재 위치다.
     const nodeId = await locate(api, p);
@@ -197,6 +211,8 @@ export default function App() {
           serverOnline={online}
           onCaptured={shot => { setPending(shot); setPhase(PHASE.REVIEW); }}
           onSimulateFire={simulateFire}
+          onMagCheck={() => setPhase(PHASE.MAGCHECK)}
+          onField={() => setPhase(PHASE.FIELD)}
         />
       )}
 
@@ -222,6 +238,14 @@ export default function App() {
           }}
           onCancel={() => { setPending(null); setPhase(PHASE.CAPTURE); }}
         />
+      )}
+
+      {phase === PHASE.MAGCHECK && (
+        <MagScreen onClose={() => setPhase(PHASE.CAPTURE)} />
+      )}
+
+      {phase === PHASE.FIELD && (
+        <FieldScreen onClose={() => setPhase(PHASE.CAPTURE)} api={api} plan={plan} />
       )}
 
       {phase === PHASE.ALARM && (

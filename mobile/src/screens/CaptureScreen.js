@@ -39,7 +39,7 @@ const HOLD_MS = 350;
 const FRAME_WIDTH_RATIO = 0.86;
 const FRAME_ASPECT = 4 / 3;
 
-export default function CaptureScreen({ onCaptured, onSimulateFire, shotCount = 0, serverOnline = false }) {
+export default function CaptureScreen({ onCaptured, onSimulateFire, onMagCheck, onField, shotCount = 0, serverOnline = false }) {
   const [permission, requestPermission] = useCameraPermissions();
   const [aligned, setAligned] = useState(false);
   const [hint, setHint] = useState('도면을 틀 안에 맞춰주세요');
@@ -270,6 +270,20 @@ export default function CaptureScreen({ onCaptured, onSimulateFire, shotCount = 
                    accessibilityRole="button"
                    accessibilityLabel="개발용. 화재 신호 모의 발생">
           <Text style={styles.devText}>🔧 화재 신호 모의 발생 (개발용)</Text>
+        </Pressable>
+
+        {/* 지자기를 측위에 쓸 수 있는지 재보는 도구. 시각장애인용이 아니라 측량하는 사람용이다. */}
+        <Pressable style={styles.devBtn} onPress={onMagCheck}
+                   accessibilityRole="button"
+                   accessibilityLabel="개발용. 지자기 재현성 검사">
+          <Text style={styles.devText}>🧭 지자기 재현성 검사 (개발용)</Text>
+        </Pressable>
+
+        {/* 보폭·층고·나침반 안정도 — 코드에 박힌 가정값을 실측으로 바꾸는 도구 */}
+        <Pressable style={styles.devBtn} onPress={onField}
+                   accessibilityRole="button"
+                   accessibilityLabel="개발용. 현장 측정">
+          <Text style={styles.devText}>📐 현장 측정 (개발용)</Text>
         </Pressable>
       </View>
     </View>

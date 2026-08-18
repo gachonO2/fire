@@ -85,11 +85,45 @@ export class Api {
   /** 서버가 아는 대피자 위치 — 비콘 게이트웨이나 관제가 올린 값 */
   getPositions() { return this._fetch('/api/positions'); }
 
+  /**
+   * 내 위치 보고 — 관제 지도에 실시간으로 뜨게 한다.
+   *
+   * 앱이 위치를 알아내 놓고 자기만 알고 있으면 관제는 대피자가 어디 있는지 모른다.
+   * 보호자 알림도 서버가 이 값을 받아야 나간다(phase 가 바뀔 때).
+   *
+   * 실패해도 조용히 넘어간다 — 위치 보고가 안 됐다고 안내를 멈추면 안 된다.
+   */
+  updatePosition(userId, payload) {
+    return this._fetch(`/api/positions/${encodeURIComponent(userId)}`, {
+      method: 'PUT', body: JSON.stringify(payload),
+    }).catch(() => null);
+  }
+
   /** 현재 위험 구간 — 화재 감지와 재탐색 판단에 함께 쓴다 */
   getHazards() { return this._fetch('/api/hazards'); }
 
   /** 구조 요청 — 위치 확신이 무너졌을 때 보호자·관제에 알린다 */
   sos(payload) {
     return this._fetch('/api/sos', { method: 'POST', body: JSON.stringify(payload) });
+  }
+
+  /**
+   * 맥이 대신 들은 비콘 판정을 받아 온다.
+   *
+   * 폰이 BLE 를 못 읽는 동안(Expo Go 제약) **실제 전파로 위치를 잡는 유일한 길**이다.
+   * SSE 를 쓰지 않고 짧은 주기로 물어보는 이유: 이 앱은 SSE 배선이 없고, 판정은
+   * 초 단위면 충분하다. 배선 하나 늘리는 것보다 이쪽이 고장날 여지가 적다.
+   */
+  getBeaconFix() { return this._fetch('/api/beacon-fix'); }
+
+  /** 도면 사진 — 지도 배경으로 깐다. 큰 data URI 라 한 번만 받아 캐시한다. */
+  getPlanImage(planId) { return this._fetch(`/api/plans/${encodeURIComponent(planId)}/image`); }
+  /** 시뮬레이션에서 "지금 서 있는 곳" — 실물 매핑이 쌓이면 안 쓰인다 */
+  getStandNode() { return this._fetch('/api/demo/stand'); }
+  /** 걸어서 잰 축척을 저장한다 — 모든 거리 안내가 이 값으로 다시 계산된다 */
+  setPlanScale(planId, metersPerUnit, note) {
+    return this._fetch(`/api/plans/${encodeURIComponent(planId)}/scale`, {
+      method: 'PUT', body: JSON.stringify({ metersPerUnit, note }),
+    });
   }
 }

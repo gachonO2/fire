@@ -1,5 +1,5 @@
 /**
- * shared/ 측위 계층 → ../fireapp/src/ 복사.
+ * shared/ 측위 계층 → mobile/src/ 복사.
  *
  * ## 왜 필요한가
  *
@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = path.join(root, 'shared');
-const dest = path.resolve(root, '..', 'fireapp', 'src');
+const dest = path.join(root, 'mobile', 'src');
 
 /** 원본이 fire/shared 인 파일들. 앱에서 고치지 말 것. */
 const FILES = [
@@ -45,7 +45,7 @@ const FILES = [
 try {
   await access(dest);
 } catch {
-  console.log('[sync-app] ../fireapp 없음 — 건너뜀');
+  console.log('[sync-app] mobile/ 없음 — 건너뜀');
   process.exit(0);
 }
 
@@ -53,4 +53,4 @@ await mkdir(dest, { recursive: true });
 for (const f of FILES) {
   await copyFile(path.join(src, f), path.join(dest, f));
 }
-console.log(`[sync-app] shared/ → ../fireapp/src/  ${FILES.length}개 복사`);
+console.log(`[sync-app] shared/ → mobile/src/  ${FILES.length}개 복사`);
