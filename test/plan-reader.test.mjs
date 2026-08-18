@@ -24,15 +24,17 @@ const det = (className, x1, y1, x2, y2, confidence = 0.9) =>
 // ─────────────────────────────────────────────── 클래스 → 지점 유형
 
 {
+  // 기호 크기는 실측을 따른다 — 853px 사진에서 픽토그램은 12~26px, 즉 가로 1.4~3%.
+  // 이보다 크면 걸름망이 "기호가 아니다"로 버린다(제목 띠 오탐을 막는 규칙).
   const { nodes } = nodesFromDetections([
-    det('exit', 0.90, 0.45, 0.96, 0.55),
-    det('stair', 0.04, 0.45, 0.10, 0.55),
-    det('elevator', 0.48, 0.60, 0.54, 0.68),
-    det('room', 0.20, 0.10, 0.35, 0.30),
-    det('door', 0.27, 0.30, 0.29, 0.32),
-    det('you_are_here', 0.50, 0.45, 0.52, 0.47),
-    det('extinguisher', 0.60, 0.40, 0.62, 0.42),
-    det('hydrant', 0.70, 0.40, 0.72, 0.42),
+    det('exit', 0.900, 0.450, 0.925, 0.475),
+    det('stair', 0.040, 0.450, 0.065, 0.475),
+    det('elevator', 0.480, 0.600, 0.505, 0.625),
+    det('room', 0.200, 0.100, 0.350, 0.300),
+    det('door', 0.270, 0.300, 0.290, 0.320),
+    det('you_are_here', 0.500, 0.450, 0.520, 0.470),
+    det('extinguisher', 0.600, 0.400, 0.620, 0.420),
+    det('hydrant', 0.700, 0.400, 0.720, 0.420),
   ]);
 
   const types = nodes.map(n => n.type);
@@ -59,8 +61,8 @@ const det = (className, x1, y1, x2, y2, confidence = 0.9) =>
 {
   // 두 모델이 같은 비상구를 각각 잡은 상황
   const { nodes } = nodesFromDetections([
-    det('exit', 0.900, 0.450, 0.960, 0.550, 0.91),
-    det('exit', 0.903, 0.452, 0.958, 0.548, 0.62),
+    det('exit', 0.900, 0.450, 0.925, 0.475, 0.91),
+    det('exit', 0.903, 0.452, 0.923, 0.473, 0.62),
   ]);
   expect('같은 자리의 중복 탐지는 하나로 합쳐진다', nodes.length === 1, `${nodes.length}개`);
   expect('남는 쪽은 확신이 높은 탐지', nodes[0].confidence === 0.91);
@@ -73,7 +75,7 @@ const det = (className, x1, y1, x2, y2, confidence = 0.9) =>
   expect('번호 이름은 바꾸라고 알린다',
     warnings.some(w => w.includes('실제 호실 이름')));
 
-  const { warnings: w2 } = nodesFromDetections([det('stair', 0.04, 0.45, 0.10, 0.55)]);
+  const { warnings: w2 } = nodesFromDetections([det('stair', 0.040, 0.450, 0.065, 0.475)]);
   expect('계단을 출구로 올렸다고 알린다',
     w2.some(w => w.includes('계단') && w.includes('출구로 표시')));
 
@@ -82,6 +84,57 @@ const det = (className, x1, y1, x2, y2, confidence = 0.9) =>
   expect('출구·방 없음 경고는 여기서 내지 않는다',
     !warnings.some(w => w.includes('찾지 못')) && !w2.some(w => w.includes('찾지 못')),
     [...warnings, ...w2].filter(w => w.includes('찾지 못')).join(' / '));
+}
+
+// ─────────────────────────────────────────────── 걸름망: 크기·범례
+
+{
+  // 실측(draft-1-1.jpg)에서 나온 배치를 그대로 옮겼다.
+  // 상단 초록 제목 띠가 통째로 "비상구"로 잡히고, 왼쪽 범례의 아이콘들이
+  // 도면 안 픽토그램보다 **더 높은 확신도**로 잡혔다.
+  const { nodes, warnings } = nodesFromDetections([
+    // 제목/헤더 — 가로 16%, 8%. 픽토그램일 수 없는 크기
+    det('exit', 0.30, 0.02, 0.46, 0.10, 0.77),
+    det('exit', 0.66, 0.03, 0.74, 0.11, 0.75),
+    // 범례 — 같은 가로 위치에 여러 종류가 세로로 줄지어 있음
+    det('exit',         0.13, 0.56, 0.16, 0.59, 0.86),
+    det('exit',         0.13, 0.64, 0.15, 0.67, 0.79),
+    det('hydrant',      0.13, 0.68, 0.15, 0.71, 0.72),
+    det('extinguisher', 0.13, 0.72, 0.15, 0.75, 0.66),
+    // 도면 안 진짜 픽토그램
+    det('exit', 0.52, 0.44, 0.545, 0.465, 0.79),
+    det('exit', 0.71, 0.79, 0.727, 0.807, 0.79),
+    det('room', 0.55, 0.55, 0.66, 0.68, 0.60),
+  ]);
+
+  const exits = nodes.filter(n => n.type === 'exit');
+  expect('제목 띠(큰 초록 영역)를 비상구로 만들지 않는다',
+    !exits.some(n => n.y < 0.15), exits.map(n => n.y.toFixed(2)).join(','));
+  expect('범례 아이콘을 비상구로 만들지 않는다',
+    !exits.some(n => n.x < 0.20), exits.map(n => n.x.toFixed(2)).join(','));
+  expect('도면 안 진짜 픽토그램은 남긴다',
+    exits.length === 2, `${exits.length}개`);
+  expect('무엇을 왜 버렸는지 알린다',
+    warnings.some(w => w.includes('너무 큰')) && warnings.some(w => w.includes('범례')));
+}
+
+{
+  // 복도를 따라 가로로 늘어선 기호는 범례가 아니다 — 지워버리면 안 된다
+  const { nodes } = nodesFromDetections([
+    det('exit',    0.20, 0.50, 0.22, 0.52, 0.8),
+    det('exit',    0.40, 0.50, 0.42, 0.52, 0.8),
+    det('hydrant', 0.60, 0.50, 0.62, 0.52, 0.8),
+    det('exit',    0.80, 0.50, 0.82, 0.52, 0.8),
+  ]);
+  expect('가로로 늘어선 기호는 범례로 오해하지 않는다',
+    nodes.filter(n => n.type === 'exit').length === 3,
+    `${nodes.filter(n => n.type === 'exit').length}개`);
+}
+
+{
+  // 실(room)은 크므로 크기 문턱을 적용하지 않는다
+  const { nodes } = nodesFromDetections([det('room', 0.2, 0.2, 0.6, 0.7, 0.7)]);
+  expect('실은 커도 버리지 않는다', nodes.filter(n => n.type === 'room').length === 1);
 }
 
 // ─────────────────────────────────────────────── 선분–사각형 교차
@@ -110,9 +163,9 @@ const det = (className, x1, y1, x2, y2, confidence = 0.9) =>
     det('room', 0.10, 0.05, 0.30, 0.40), det('room', 0.40, 0.05, 0.60, 0.40),
     det('room', 0.70, 0.05, 0.90, 0.40), det('room', 0.10, 0.60, 0.30, 0.95),
     det('room', 0.40, 0.60, 0.60, 0.95), det('room', 0.70, 0.60, 0.90, 0.95),
-    det('exit', 0.02, 0.47, 0.07, 0.53),
-    det('exit', 0.93, 0.47, 0.98, 0.53),
-    det('you_are_here', 0.49, 0.48, 0.51, 0.52),
+    det('exit', 0.020, 0.480, 0.045, 0.505),
+    det('exit', 0.955, 0.480, 0.980, 0.505),
+    det('you_are_here', 0.490, 0.485, 0.510, 0.505),
   ];
   const { nodes, roomBoxes } = nodesFromDetections(detections);
   const { nodes: all, edges, warnings } = inferCorridorEdges(nodes, roomBoxes);

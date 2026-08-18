@@ -49,7 +49,7 @@ ROUND4_MODEL = Path(os.getenv("ROUND4_MODEL", str(MODEL_DIR / "round4_guarded_be
 # 낮게 잡아 많이 건지고, 걸러내는 일은 사람이 편집기에서 한다.
 CONF = float(os.getenv("DETECT_CONF", "0.25"))
 IOU = float(os.getenv("DETECT_IOU", "0.50"))
-IMGSZ = int(os.getenv("DETECT_IMGSZ", "768"))
+IMGSZ = int(os.getenv("DETECT_IMGSZ", "1280"))
 
 DEVICE = "0" if torch.cuda.is_available() else "cpu"
 
