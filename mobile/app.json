@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "대피 안내",
+    "slug": "fireapp",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "피난안내도를 촬영해 대피 경로를 만듭니다. 화재 시에는 손전등으로 주변에 위치를 알립니다.",
+        "NSPhotoLibraryUsageDescription": "이미 찍어둔 피난안내도를 불러옵니다.",
+        "NSMotionUsageDescription": "도면을 똑바로 찍도록 폰의 기울기를 확인하고, 대피 시 방향을 안내합니다.",
+        "UIBackgroundModes": [
+          "audio"
+        ]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-audio"
+    ]
+  }
+}
