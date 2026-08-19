@@ -19,24 +19,23 @@ export function polylineLength(points = []) {
   return length;
 }
 
-// 원래 도면 축척(0.1067m/px)은 1352px짜리 한 층을 144m로 계산해 지나치게 컸다.
-// 이 시나리오는 도면 전체 폭을 약 50m로 보정한다. 문 폭·복도 폭과 비교해도
-// 1px ≈ 3.7cm가 자연스럽고, 아래 파란 경로는 약 22.6m가 된다.
-const METERS_PER_UNIT = 50 / 1352;
-const STEP_LENGTH = 0.7;
+// 2026-08-19 현장 실측값. FR/FR(북쪽)과 CREATIVE WORKSPACE 옆 비상구 사이를
+// 63걸음(보폭 0.7m) 걸었고, 두 지점의 도면상 직선거리는 405.743px였다.
+// 축척은 이 값에서만 계산한다. 파란 선은 두 지점을 잇는 직선보다 굽어 있으므로
+// 전체 대피 경로 길이는 44.1m가 아니라 약 66.3m가 된다.
+const FIELD_CALIBRATION = Object.freeze({
+  fromNodeId: 'EXIT_CW',
+  toNodeId: 'R_FRFR1',
+  steps: 63,
+  stepLength: 0.7,
+  walkedMeters: 44.1,
+  planUnits: 405.7429640794773,
+  measuredAt: '2026-08-19',
+});
+const METERS_PER_UNIT = FIELD_CALIBRATION.walkedMeters / FIELD_CALIBRATION.planUnits;
+const STEP_LENGTH = FIELD_CALIBRATION.stepLength;
 const TOTAL_METERS = polylineLength(ROUTE) * METERS_PER_UNIT;
 const DURATION_MS = 90_000;
-// 탈출선 위에 놓은 시연용 비콘. 실제 구매·설치 좌표가 정해지기 전까지는
-// `SIM-` 접두어로 실제 장비와 섞이지 않게 한다.
-const BEACONS = Object.freeze([
-  { id: 'SIM-EXIT-B1', progress: 0.18, txPower: -59, biasDb: 2 },
-  { id: 'SIM-EXIT-B2', progress: 0.40, txPower: -59, biasDb: -2 },
-  { id: 'SIM-EXIT-B3', progress: 0.63, txPower: -59, biasDb: 1 },
-  { id: 'SIM-EXIT-B4', progress: 0.84, txPower: -59, biasDb: -1 },
-].map(beacon => {
-  const point = pointOnRoute(ROUTE, beacon.progress);
-  return Object.freeze({ ...beacon, x: point.x, y: point.y });
-}));
 const TOTAL_STEPS = ROUTE.slice(1).reduce((sum, point, i) => {
   const previous = ROUTE[i];
   const meters = Math.hypot(point[0] - previous[0], point[1] - previous[1]) * METERS_PER_UNIT;
@@ -58,8 +57,8 @@ export const PHOTO_SCENARIO = Object.freeze({
   totalMeters: Math.round(TOTAL_METERS * 10) / 10,
   totalSteps: TOTAL_STEPS,
   durationMs: DURATION_MS,
-  beacons: BEACONS,
-  scaleNote: '도면 전체 폭 50m 추정 — 현장 실측 후 교체',
+  calibration: FIELD_CALIBRATION,
+  scaleNote: '현장 실측 63걸음 × 0.700m ÷ 405.743px',
 });
 
 /** 경로 길이를 기준으로 진행률 위치를 찾는다. 점 개수가 달라도 속도가 일정하다. */
@@ -95,11 +94,12 @@ export function pointOnRoute(points = ROUTE, progress = 0) {
 }
 
 /**
- * 현재 위치에서 보일 시연용 비콘 RSSI를 만든다.
- * 자유공간 로그 거리 모델의 단순값이며 실제 측정치가 아니다. 같은 서버 스냅샷에
- * 넣어 관제와 휴대폰이 서로 다른 난수를 만들지 않게 한다.
+ * 현재 위치에서 기존 답사 비콘 위치에 대응하는 RSSI를 만든다.
+ * 비콘 좌표와 ID를 여기서 만들지 않는다. 서버에 저장된 실제 답사 매핑을 받아
+ * 값만 계산해야 지도에 없는 B1/B2 같은 가짜 설비가 생기지 않는다.
+ * 자유공간 로그 거리 모델의 단순값이며 실제 측정치는 아니다.
  */
-export function scenarioBeaconReadings(position, beacons = BEACONS) {
+export function scenarioBeaconReadings(position, beacons = []) {
   const px = Number(position?.x);
   const py = Number(position?.y);
   return beacons.map(beacon => {
@@ -107,12 +107,12 @@ export function scenarioBeaconReadings(position, beacons = BEACONS) {
       ? Math.hypot(beacon.x - px, beacon.y - py) * METERS_PER_UNIT
       : 0;
     const modeledDistance = Math.max(0.5, distanceMeters);
+    const txPower = Number.isFinite(beacon.txPower) ? beacon.txPower : -59;
+    const biasDb = Number.isFinite(beacon.biasDb) ? beacon.biasDb : 0;
     const rssi = Math.max(-96, Math.min(-42,
-      Math.round(beacon.txPower - 20 * Math.log10(modeledDistance) + beacon.biasDb)));
+      Math.round(txPower - 20 * Math.log10(modeledDistance) + biasDb)));
     return {
-      id: beacon.id,
-      x: beacon.x,
-      y: beacon.y,
+      ...beacon,
       rssi,
       distanceMeters: Math.round(distanceMeters * 10) / 10,
       simulated: true,
@@ -121,7 +121,7 @@ export function scenarioBeaconReadings(position, beacons = BEACONS) {
 }
 
 /** 서버 시각 하나로 관제와 휴대폰이 함께 쓰는 90초 대피 상태를 만든다. */
-export function photoScenarioSnapshot(startedAt, now = Date.now()) {
+export function photoScenarioSnapshot(startedAt, now = Date.now(), beacons = []) {
   const running = Number.isFinite(startedAt);
   const elapsedMs = running ? Math.max(0, now - startedAt) : 0;
   const progress = running ? Math.min(1, elapsedMs / DURATION_MS) : 0;
@@ -134,7 +134,7 @@ export function photoScenarioSnapshot(startedAt, now = Date.now()) {
     remainingMs: Math.max(0, DURATION_MS - elapsedMs),
     remainingMeters,
     stepsLeft: Math.ceil(remainingMeters / STEP_LENGTH),
-    beacons: scenarioBeaconReadings(point),
+    beacons: scenarioBeaconReadings(point, beacons),
     phase: progress >= 1 ? 'arrived' : 'guiding',
     timelineState: running ? (progress >= 1 ? 'arrived' : 'running') : 'armed',
   };

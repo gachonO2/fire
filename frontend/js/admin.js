@@ -423,6 +423,7 @@ async function syncPhotoScenarioPosition() {
     // 경로 계산에 맡기지 않아야 휴대폰과 같은 지점에 있다.
     live?.update(liveTrackPositions());
     drawPhotoScenario();
+    drawSurvey();
     drawPicks();
     updateStats();
     syncPhotoScenarioButton();
@@ -999,22 +1000,6 @@ function drawPhotoScenario() {
     ? [current.x, current.y]
     : PHOTO_SCENARIO.current;
   const end = PHOTO_SCENARIO.route.at(-1);
-  const scenarioBeacons = current?.beacons || PHOTO_SCENARIO.beacons || [];
-  const beaconMarkup = isOn('show-beacons') ? scenarioBeacons.map(beacon => {
-    const s = u * 3.3;
-    const shortId = beacon.id.replace('SIM-EXIT-', '');
-    const value = Number.isFinite(beacon.rssi) ? ` · ${beacon.rssi} dBm` : '';
-    return `<g class="photo-beacon" data-beacon="${beacon.id}">
-      <circle cx="${beacon.x}" cy="${beacon.y}" r="${u * 7}"
-        fill="var(--beacon)" fill-opacity=".10"/>
-      <polygon points="${beacon.x},${beacon.y - s} ${beacon.x + s},${beacon.y} ${beacon.x},${beacon.y + s} ${beacon.x - s},${beacon.y}"
-        fill="var(--beacon)" stroke="#f4e8ff" stroke-width="${u * .45}"/>
-      <text x="${beacon.x}" y="${beacon.y - u * 5.2}" text-anchor="middle"
-        font-size="${u * 3.6}" font-weight="800" fill="#e4bdff"
-        paint-order="stroke" stroke="#111820" stroke-width="${u * 1.15}">${shortId}${value}</text>
-      <title>${beacon.id}${value} · 시뮬레이션 값</title>
-    </g>`;
-  }).join('') : '';
 
   svg.innerHTML = `
     <defs>
@@ -1043,8 +1028,6 @@ function drawPhotoScenario() {
       <animate attributeName="stroke-dashoffset" from="${u * 11}" to="0"
         dur="1.05s" repeatCount="indefinite"/>
     </polyline>
-
-    ${beaconMarkup}
 
     <g filter="url(#photoFireGlow)">
       <circle cx="${fx}" cy="${fy}" r="${u * 12}" fill="var(--danger)" fill-opacity=".16"
@@ -1141,6 +1124,9 @@ function drawSurvey() {
 
   if (!isOn('show-beacons') || surveyedSpots.size === 0) { svg.innerHTML = ''; return; }
   const u = Number(vb.split(/\s+/)[2]) / 300;
+  const readings = new Map((photoScenarioPosition()?.beacons || [])
+    .filter(b => b?.nodeId)
+    .map(b => [b.nodeId, b]));
 
   svg.innerHTML = [...surveyedSpots].map(([nodeId, n]) => {
     const node = plan.getNode?.(nodeId) || plan.nodes.find(x => x.id === nodeId);
@@ -1154,12 +1140,21 @@ function drawSurvey() {
     // 얇은 곳은 주황 그대로 — 이 화면의 색 규칙에서 주황이 «봐야 하지만
     // 위험은 아닌 것» 이고, 얇은 답사가 정확히 그것이다.
     const c = weak ? 'var(--warn)' : 'var(--beacon)';
-    return `<circle cx="${node.x}" cy="${node.y}" r="${r * 2.1}" fill="${c}" opacity="${0.08 + w * 0.10}"/>
+    const reading = readings.get(nodeId);
+    const value = isPhotoScenarioActive() && Number.isFinite(reading?.rssi)
+      ? `${reading.rssi} dBm` : '';
+    return `<g class="survey-beacon" data-survey-node="${nodeId}">
+      <circle cx="${node.x}" cy="${node.y}" r="${r * 2.1}" fill="${c}" opacity="${0.08 + w * 0.10}"/>
       <circle cx="${node.x}" cy="${node.y}" r="${r}" fill="none" stroke="${c}"
         stroke-width="${u * 0.9}" opacity="${0.5 + w * 0.45}"/>
       <text x="${node.x}" y="${node.y + u * 1.3}" text-anchor="middle"
         font-size="${u * 3.4}" font-weight="700" fill="${c}"
-        paint-order="stroke" stroke="#fff" stroke-width="${u}">${n}</text>`;
+        paint-order="stroke" stroke="#fff" stroke-width="${u}">${n}</text>
+      ${value ? `<text x="${node.x}" y="${node.y - r * 1.45}" text-anchor="middle"
+        font-size="${u * 3.1}" font-weight="800" fill="#e4bdff"
+        paint-order="stroke" stroke="#111820" stroke-width="${u}">${value}</text>` : ''}
+      <title>${node.name} · 기존 매핑 ${n}개${value ? ` · ${value} 시뮬레이션` : ''}</title>
+    </g>`;
   }).join('');
 }
 
@@ -1471,17 +1466,13 @@ function drawWalls() {
 
 function updateBeaconChrome() {
   const real = hasRealBeacons();
-  // 위험 SSE와 위치 SSE는 도착 순서가 다를 수 있다. 시연 위치가 이미 생겼다면
-  // 비콘 UI는 바로 켠다. 화재 이벤트까지 기다리면 한동안 "비콘 없음"으로 보인다.
-  const scenarioCount = (isPhotoScenarioActive() || photoScenarioPosition())
-    ? (PHOTO_SCENARIO.beacons?.length || 0) : 0;
-  const any = real || surveyedCount > 0 || scenarioCount > 0;
+  const any = real || surveyedCount > 0;
   const btn = document.getElementById('show-beacons');
   if (btn) {
     btn.disabled = !any;
     btn.style.opacity = any ? '' : '.35';
     btn.title = any
-      ? `비콘 표시 (실물 ${real ? '있음' : '없음'} · 답사 ${surveyedCount}개 · 시연 ${scenarioCount}개)`
+      ? `비콘 표시 (도면 등록 ${real ? '있음' : '없음'} · 기존 매핑 ${surveyedCount}개)`
       : '표시할 비콘이 없습니다 — 도면에 비콘 id 가 없고, 답사로 태그한 지점도 없습니다';
   }
   const wave = document.getElementById('show-waves');
@@ -1493,12 +1484,12 @@ function updateBeaconChrome() {
   if (note) {
     note.hidden = false;
     const thin = [...surveyedSpots.values()].filter(n => n <= 2).length;
-    note.textContent = scenarioCount > 0
-      ? `시연 비콘 ${scenarioCount}개 · RSSI 가상값`
-      : surveyedSpots.size === 0
+    note.textContent = surveyedSpots.size === 0
       ? '비콘 없음 — 답사 전'
-      : `답사 ${surveyedSpots.size}지점` + (thin ? ` · ${thin}곳 신호 얇음` : '');
-    note.style.color = scenarioCount > 0 ? 'var(--beacon)' : thin ? 'var(--warn)' : 'var(--muted)';
+      : `기존 비콘 ${surveyedCount}개 · ${surveyedSpots.size}지점`
+        + (isPhotoScenarioActive() ? ' · RSSI 시뮬레이션' : '')
+        + (thin ? ` · ${thin}곳 신호 얇음` : '');
+    note.style.color = isPhotoScenarioActive() ? 'var(--beacon)' : thin ? 'var(--warn)' : 'var(--muted)';
   }
 }
 

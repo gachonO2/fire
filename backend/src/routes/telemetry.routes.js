@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { getRepo } from '../repositories/index.js';
 import { PHOTO_SCENARIO, photoScenarioSnapshot } from '../../../shared/photo-scenario.js';
+import { surveyedBeaconPlacements } from './beacons.routes.js';
 
 export const telemetryRoutes = Router();
 
@@ -58,11 +59,16 @@ function photoTimelinePayload(snapshot, extra = {}) {
   };
 }
 
+async function currentPhotoSnapshot(repo, startedAt, now) {
+  const plan = await repo.getActivePlan();
+  return photoScenarioSnapshot(startedAt, now, surveyedBeaconPlacements(plan));
+}
+
 /** 관제가 시나리오를 준비한다. 휴대폰이 안내 화면에 들어오기 전에는 0초에 멈춘다. */
 telemetryRoutes.post('/demo/photo-scenario/arm', async (_req, res) => {
   const repo = await getRepo();
   const now = Date.now();
-  const snapshot = photoScenarioSnapshot(null, now);
+  const snapshot = await currentPhotoSnapshot(repo, null, now);
   const payload = photoTimelinePayload(snapshot, { scenarioStartedAt: null });
   await repo.setPosition(PHOTO_SCENARIO.userId, payload);
   res.json({ userId: PHOTO_SCENARIO.userId, serverNow: now, ...payload });
@@ -75,7 +81,7 @@ telemetryRoutes.post('/demo/photo-scenario/start', async (_req, res) => {
   const now = Date.now();
   // 여러 화면이 동시에 요청해도 이미 달리는 타임라인은 다시 0초로 돌리지 않는다.
   const startedAt = Number.isFinite(current?.scenarioStartedAt) ? current.scenarioStartedAt : now;
-  const snapshot = photoScenarioSnapshot(startedAt, now);
+  const snapshot = await currentPhotoSnapshot(repo, startedAt, now);
   const payload = photoTimelinePayload(snapshot, { scenarioStartedAt: startedAt });
   await repo.setPosition(PHOTO_SCENARIO.userId, payload);
   res.json({ userId: PHOTO_SCENARIO.userId, serverNow: now, ...payload });
@@ -89,7 +95,7 @@ telemetryRoutes.get('/demo/photo-scenario', async (_req, res) => {
 
   const now = Date.now();
   const startedAt = Number.isFinite(current.scenarioStartedAt) ? current.scenarioStartedAt : null;
-  const snapshot = photoScenarioSnapshot(startedAt, now);
+  const snapshot = await currentPhotoSnapshot(repo, startedAt, now);
   const payload = photoTimelinePayload(snapshot, { scenarioStartedAt: startedAt });
   // 도착 전환은 저장소에도 한 번 남겨 이후 SSE 구독도 완료 상태를 받게 한다.
   if (snapshot.phase === 'arrived' && current.phase !== 'arrived') {

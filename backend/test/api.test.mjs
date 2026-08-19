@@ -118,7 +118,10 @@ const livePhoto = await api('/api/demo/photo-scenario');
 expect('서버가 관제·휴대폰 공용 좌표를 반환',
   livePhoto.body.userId === 'scenario-cocone-photo' &&
   Number.isFinite(livePhoto.body.serverNow) && Number.isFinite(livePhoto.body.x) &&
-  livePhoto.body.beacons?.length === 4 && livePhoto.body.beacons.every(b => Number.isFinite(b.rssi)));
+  Array.isArray(livePhoto.body.beacons) &&
+  livePhoto.body.beacons.every(b => b.mapped && Number.isFinite(b.rssi)));
+expect('답사 매핑이 없는 테스트 도면에는 임의 비콘을 만들지 않음',
+  livePhoto.body.beacons.length === 0);
 await api('/api/positions/scenario-cocone-photo', { method: 'DELETE' });
 
 // 15) 경로 요청마다 KPI가 자동 기록됨

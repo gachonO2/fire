@@ -293,6 +293,39 @@ function saveSurvey() {
 
 loadSurvey();
 
+/**
+ * 사진 시나리오가 사용할 기존 답사 위치.
+ *
+ * 한 위치에서 여러 BLE 신호를 잡았으므로 장치 24개를 같은 좌표에 겹쳐 찍지 않고
+ * «답사 위치 8곳»으로 묶는다. 실제 장치 ID는 beaconIds에 그대로 남겨 관제에서
+ * 언제든 원본 매핑과 대조할 수 있다.
+ */
+export function surveyedBeaconPlacements(plan) {
+  if (!plan?.nodes?.length) return [];
+  const grouped = new Map();
+  for (const [beaconId, nodeId] of Object.entries(surveyFor(plan))) {
+    const ids = grouped.get(nodeId) || [];
+    ids.push(beaconId);
+    grouped.set(nodeId, ids);
+  }
+
+  return [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b)).flatMap(([nodeId, beaconIds]) => {
+    const node = plan.nodes.find(n => n.id === nodeId);
+    if (!node || !Number.isFinite(node.x) || !Number.isFinite(node.y)) return [];
+    return [{
+      id: `survey-spot:${nodeId}`,
+      nodeId,
+      nodeName: node.name,
+      x: node.x,
+      y: node.y,
+      count: beaconIds.length,
+      beaconIds: [...beaconIds].sort(),
+      txPower: -59,
+      mapped: true,
+    }];
+  });
+}
+
 beaconRoutes.put('/beacon-map/mapping', async (req, res) => {
   const { mapping, merge = true } = req.body || {};
   if (!mapping || typeof mapping !== 'object') {
