@@ -101,7 +101,7 @@ export class LiveTrack {
     this.svg.innerHTML = '';
     if (!floorPlan || !this.tracks.size) return;
 
-    const scale = this._scale(floorPlan);
+    const scale = this._scale(floorPlan) * (this.markerScale ?? 1);
     const now = Date.now();
 
     for (const [userId, t] of this.tracks) {
@@ -167,9 +167,14 @@ export class LiveTrack {
   }
 
   _label(t, scale, color, dim) {
-    const text = t.phase === 'safehold' ? `${t.name} — 구조 필요`
-      : t.phase === 'arrived' ? `${t.name} — 대피 완료`
-      : t.exitName ? `${t.name} → ${t.exitName}` : t.name;
+    // 지도의 이름표는 **누가 어디 있나**만 답한다.
+    //
+    // 예전에는 «지점 → 목적지»를 통째로 넣었는데, 두 지점 이름이 다 긴
+    // 한국어라 이름표 하나가 도면 절반을 가로질렀다. 사람이 둘만 돼도
+    // 서로를 덮는다. 목적지는 상세 패널이 답하는 질문이라 거기로 옮겼다.
+    const text = t.phase === 'safehold' ? `${t.name} · 구조 필요`
+      : t.phase === 'arrived' ? `${t.name} · 완료`
+      : t.name;
     const w = scale * (text.length * 0.95 + 1.6);
     const y = t.y - scale * 3.4;
 
@@ -179,7 +184,7 @@ export class LiveTrack {
     });
     this._el('text', {
       x: t.x, y: y + scale * 0.25, 'text-anchor': 'middle',
-      'font-size': scale * 1.4, fill: color, 'font-weight': '700',
+      'font-size': scale * 1.15, fill: color, 'font-weight': '700',
       'fill-opacity': dim,
     }).textContent = text;
   }
@@ -192,6 +197,9 @@ export class LiveTrack {
   }
 
   /** 도면 좌표계가 미터냐 픽셀이냐에 따라 값이 크게 달라져 선 굵기를 정규화한다 */
+  /** 마커·이름표 크기 배수. 관제는 도면을 크게 띄우므로 작게 줄여 쓴다. */
+  setMarkerScale(k) { this.markerScale = k; }
+
   _scale(floorPlan) {
     const xs = floorPlan.nodes.map(n => n.x);
     const ys = floorPlan.nodes.map(n => n.y);

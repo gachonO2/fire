@@ -22,10 +22,20 @@ const NS = 'http://www.w3.org/2000/svg';
 const WAVE_PERIOD_MS = 1800;
 const RINGS = 3;
 
+/**
+ * 비콘은 **보라 계열 하나로 묶는다.**
+ *
+ * 예전에는 확정이 파랑(#0090ff), 찾은 것이 초록(#22c55e)이었다. 그런데 파랑은
+ * 경로 색이고 초록은 출구 색이다 — 지도에서 «저 파란 점이 경로인가 비콘인가»,
+ * «저 초록 점이 출구인가 비콘인가» 가 안 갈렸다.
+ *
+ * 색은 뜻을 하나씩만 맡아야 흘깃 봐도 읽힌다. 그래서 비콘은 통째로 보라로 옮기고,
+ * 셋을 **밝기로** 구분한다. 모양(마름모/원)도 이미 다르므로 둘이 겹쳐 판단된다.
+ */
 export const BEACON_COLORS = {
-  real: '#0090ff',      // 도면에 beaconId를 등록한 비콘
-  virtual: '#8b5cf6',   // 앱이 자동으로 채우는 가상 비콘
-  found: '#22c55e',     // 걸으면서 찾아낸 실물 비콘 (아직 도면에 안 넣음)
+  real: '#b06bff',      // 도면에 beaconId를 등록한 비콘 — 확정이라 제일 진하다
+  virtual: '#7f6aa8',   // 앱이 자동으로 채우는 가상 비콘 — 진짜가 아니라 탁하다
+  found: '#d8a2ff',     // 걸으면서 찾아낸 실물 비콘 (아직 도면에 안 넣음) — 추정이라 옅다
 };
 
 /**
@@ -217,8 +227,19 @@ function add(svg, tag, attrs) {
 }
 
 /** 도면 좌표계가 미터냐 픽셀이냐에 따라 값이 크게 달라져서 선 굵기를 정규화한다 */
+/**
+ * 비콘 표시 크기 배수.
+ *
+ * 폰은 도면을 손바닥만 하게 띄우므로 도면 폭의 1/40 이 맞다. 관제는 같은
+ * 도면을 화면 전체로 띄우는데, 43개 지점에 가상 비콘이 하나씩 있으면 그
+ * 크기로는 다이아몬드가 통로를 통째로 덮는다. 관제에서 봐야 하는 것은
+ * 비콘이 아니라 **사람과 통로**이므로, 비콘은 배경으로 물러나야 한다.
+ */
+let beaconScale = 1;
+export function setBeaconScale(k) { beaconScale = k; }
+
 function planScale(floorPlan) {
-  return (planSpan(floorPlan) / 40) || 1;
+  return ((planSpan(floorPlan) / 40) || 1) * beaconScale;
 }
 
 function planSpan(floorPlan) {

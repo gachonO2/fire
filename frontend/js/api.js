@@ -67,11 +67,34 @@ export class Api {
     const changed = JSON.stringify(this.floorPlan.toJSON()) !== JSON.stringify(plan);
     this.floorPlan = new FloorPlan(plan);
     this._savePlanCache(plan);
-    if (changed) this._loadPlanImage(plan.id);
+    // 도면이 **바뀌었을 때만** 받으면, 새로고침 때는 도면이 그대로이므로
+    // 영영 안 받아온다. 캐시가 비어 있으면(용량 초과로 저장이 실패했거나
+    // 다른 브라우저면) 사진 없는 지도가 뜬다 — 벽도 방도 안 보이는 지도다.
+    if (changed || !this.backgroundImage) this._loadPlanImage(plan.id);
     return changed;
   }
 
+  /**
+   * 원본 도면 사진을 받지 않는다.
+   *
+   * 관제는 글씨·배경을 지운 정리본(`/api/plans/:id/floor`, 198KB PNG)을 쓴다.
+   * 그런데도 원본(847KB base64 데이터 URI)을 매번 받아 JSON 으로 파싱하고
+   * base64 를 디코딩하고 localStorage 에 쓰고 있었다 — 화면에 한 번도 안
+   * 쓰이는 값에 그 일을 다 했다.
+   */
+  skipPlanImage = false;
+
   async _loadPlanImage(planId) {
+    // 사진을 건너뛰더라도 **`plan` 은 반드시 쏜다.**
+    //
+    // 이 함수가 도면 갱신의 마지막 단계라 화면들이 여기서 나오는 `plan` 을
+    // 기다린다. 일찍 돌아가면 사진만 안 받는 게 아니라 도면 자체가 화면에
+    // 도착하지 않는다 — 지도는 뜨는데 벽도 방도 안 그려지고 위험 구역도
+    // 안 들어온다.
+    if (this.skipPlanImage) {
+      this._emit('plan', this.floorPlan.toJSON());
+      return;
+    }
     try {
       const { dataUri } = await this._fetch(`/api/plans/${encodeURIComponent(planId)}/image`);
       this.backgroundImage = dataUri;
@@ -189,8 +212,10 @@ export class Api {
   }
 
   // ------------------------------------------------------------ 관제 쓰기
-  setHazard(edgeId, type) {
-    return this._fetch(`/api/hazards/${edgeId}`, { method: 'PUT', body: JSON.stringify({ type }) });
+  setHazard(edgeId, type, extra = {}) {
+    return this._fetch(`/api/hazards/${edgeId}`, {
+      method: 'PUT', body: JSON.stringify({ type, ...extra }),
+    });
   }
 
   clearHazard(edgeId) {
@@ -288,6 +313,28 @@ export class Api {
     try {
       await this._fetch(`/api/positions/${userId}`, { method: 'PUT', body: JSON.stringify(payload) });
     } catch (_) { /* 위치 보고 실패는 안내를 막지 않는다 */ }
+  }
+
+  /** 관제 시나리오용 위치 쓰기 — 실패를 호출자에게 알려 화면에 표시한다. */
+  setPosition(userId, payload) {
+    return this._fetch(`/api/positions/${encodeURIComponent(userId)}`, {
+      method: 'PUT', body: JSON.stringify(payload),
+    });
+  }
+
+  removePosition(userId) {
+    return this._fetch(`/api/positions/${encodeURIComponent(userId)}`, { method: 'DELETE' });
+  }
+
+  clearPositions() {
+    return this._fetch('/api/positions', { method: 'DELETE' });
+  }
+
+  /** 네이티브 앱의 가상 비콘 출발점을 시나리오 위치에 맞춘다. */
+  setDemoStand(nodeId) {
+    return this._fetch('/api/demo/stand', {
+      method: 'PUT', body: JSON.stringify({ nodeId }),
+    });
   }
 
   _queueRetry(fn, delay = 5000) {
