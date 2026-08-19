@@ -14,7 +14,8 @@
         "NSMotionUsageDescription": "도면을 똑바로 찍도록 폰의 기울기를 확인하고, 대피 시 방향을 안내합니다.",
         "UIBackgroundModes": [
           "audio"
-        ]
+        ],
+        "NSBluetoothAlwaysUsageDescription": "가까운 비콘의 전파 세기를 재서 지금 어느 지점에 계신지 알아냅니다. 연결하거나 자료를 주고받지 않고, 세기만 읽습니다."
       }
     },
     "android": {
@@ -23,13 +24,28 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      },
+      "permissions": [
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.BLUETOOTH_SCAN"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-audio"
+      "expo-audio",
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "modes": [
+            "peripheral"
+          ],
+          "bluetoothAlwaysPermission": "가까운 비콘의 전파 세기를 재서 지금 어느 지점에 계신지 알아냅니다."
+        }
+      ]
     ]
   }
 }

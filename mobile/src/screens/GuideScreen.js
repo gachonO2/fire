@@ -49,6 +49,8 @@ import { NorthCalibrator } from '../calibrate';
 import { HapticCompass, cueStart, cueLocked } from '../haptics';
 import { beepDirection, chimeGood, chimeWrong, chimeLocked } from '../sound';
 import { say, stopSpeaking } from '../announce';
+import { deviceIdNow } from '../deviceId';
+import EmergencyTorch from '../EmergencyTorch';
 import { theme } from '../theme';
 
 const TICK_MS = 110;
@@ -107,7 +109,8 @@ const WRONG_NAG_MS = 6000;
 /** 서버에서 건물 이름을 못 받았을 때 보여줄 값 */
 const FALLBACK_PLACE = 'AI 공학관 7층';
 
-export default function GuideScreen({ api, plan, route, startNode, onExit, onSafeHold }) {
+export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
+                                      startNode, scenario = null, onExit, onSafeHold }) {
   const [err, setErr] = useState(null);
   const [align, setAlign] = useState(0);
   const [blocked, setBlocked] = useState(false);   // 방향을 믿을 수 없는 상태
@@ -121,8 +124,14 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
   const sensor = useRef(new BearingSensor()).current;
   const haptic = useRef(new HapticCompass()).current;
   const odo = useRef(new Odometry()).current;
-  const userId = useRef(`app-${Math.random().toString(36).slice(2, 8)}`);
-  const followerRef = useRef(new RouteFollower(plan, route));
+  // 기기마다 하나. 새로고침해도 안 바뀐다 — 바뀌면 관제에 유령이 하나씩 쌓인다.
+  const userId = useRef(deviceIdNow());
+  const followerOptions = wallSet => ({
+    walls: wallSet,
+    path: scenario?.route ?? null,
+    metersPerUnit: scenario?.metersPerUnit ?? null,
+  });
+  const followerRef = useRef(new RouteFollower(plan, route, followerOptions(wallsProp)));
 
   // 판단 계층. 비콘·걸음·기압·지자기를 하나의 위치·확신도로 모은다(`src/tracking.js`).
   // 경로 추종(RouteFollower)과 **일부러 분리**한다 — 경로 추종은 "걸었으니 갔겠지"로
@@ -143,6 +152,7 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
   const [mapped, setMapped] = useState(0);   // 실제 전파로 자리를 알아낸 신호원 수
   // 도면 사진 — 지도 배경. 한 번만 받아 둔다(수백 KB 라 매번 받으면 안 된다).
   const [planImage, setPlanImage] = useState(null);
+  const [walls, setWalls] = useState(wallsProp);
   const lowConfSince = useRef(0);    // 확신도가 낮아진 시각 (0 = 정상)
   const rotate = useRef(new Animated.Value(0)).current;
 
@@ -176,6 +186,20 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
     if (plan?.id && plan?.image?.width) {
       api?.getPlanImage?.(plan.id)
         .then(r => { if (alive && r?.dataUri) setPlanImage(r.dataUri); })
+        .catch(() => {});
+    }
+
+    // 벽을 받아 두면 통로를 그릴 때 **덜 뚫는 쪽으로** 꺾을 수 있다.
+    // 없어도 그려지므로(긴 축 먼저) 조용히 넘어간다.
+    if (plan?.id) {
+      api?.getPlanWalls?.(plan.id)
+        .then(w => {
+          if (!alive || !w?.walls?.length) return;
+          setWalls(w.walls);
+          // 아직 출발 전이면 경로도 다시 편다 — 그리는 쪽과 같은 꺾임을 써야 한다
+          followerRef.current?.setWalls?.(w.walls);
+          setInfo(followerRef.current.describe());
+        })
         .catch(() => {});
     }
 
@@ -377,7 +401,7 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
     // 다만 확신이 있을 때만 판단하고(`offRoute` 안에서 거른다), 잠깐 어긋난 것으로
     // 흔들지 않도록 몇 초 이어질 때만 재탐색한다.
     const onEdge = f.position()?.edgeId ?? null;
-    if (tracking.offRoute(onEdge)) {
+    if (!scenario && tracking.offRoute(onEdge)) {
       if (!offRouteSince.current) offRouteSince.current = Date.now();
       else if (Date.now() - offRouteSince.current > OFF_ROUTE_MS) {
         offRouteSince.current = 0;
@@ -425,6 +449,11 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
       // 함께 들어가 있고, 증거 없이 오래 걸으면 스스로 떨어진다.
       confidence: tracking.confidence(),
       source: tracking.source(),        // 'beacon' | 'barometer' | 'magnetic' | 'pdr'
+      // **어느 쪽을 보고 있나.** 관제가 «저 사람 반대로 서 있다» 를 볼 수 있어야 하고,
+      // 무엇보다 화면의 부채꼴과 경로선이 어긋날 때 그걸 잴 길이 이것뿐이다.
+      // 자북 기준 그대로 보낸다 — 도면 기준으로 바꾸는 일은 받는 쪽이 한다.
+      heading: Number.isFinite(sensor.heading) ? sensor.heading : null,
+      headingStable: sensor.stability >= STABILITY_FLOOR,
       exitName: d.exitName,
       stepsLeft: d.stepsLeft,
       routeNodes: route?.nodes || null,
@@ -478,10 +507,18 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
     if (got) {
       const wasBlind = f.northOffset === null;
       f.setNorthOffset(got.offset);
+      // 판단 계층에도 같은 값을 넣는다 — 이게 빠져 있어서 나침반이 후보를
+      // 감점하는 일을 한 번도 못 했다. 안내기만 알고 있으면 «폰을 돌리세요» 는
+      // 되지만 «어느 갈래로 갔나» 는 여전히 걸음으로만 판단하게 된다.
+      tracking.setNorthOffset(got.offset);
       if (wasBlind) {
         noNorth.current = false;
         chimeGood();
         speak('방향을 잡았습니다. 폰을 돌리면 맞는 쪽에서 진동이 세집니다.');
+        // 서버에도 남긴다 — 건물이 돌아가지 않으니 한 번 재면 끝나는 값이다.
+        // 다음 사람은 곧게 네 걸음을 걷기 전부터 방향 안내를 받는다.
+        if (plan?.id) api?.setPlanNorth?.(plan.id, got.offset, '걸으면서 자동 보정')
+          ?.catch?.(() => {});
       }
     }
 
@@ -530,7 +567,7 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
     if (!next) return safeHold('여기서 갈 수 있는 안전한 경로가 없습니다.');
 
     routeRef.current = next;
-    followerRef.current = new RouteFollower(plan, next);
+    followerRef.current = new RouteFollower(plan, next, followerOptions(walls));
     zone.current = null;
     calib.resetSegment();
     setInfo(followerRef.current.describe());
@@ -550,7 +587,7 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
     if (!res?.route) return safeHold('안전한 경로를 찾지 못했습니다.');
 
     routeRef.current = res.route;
-    followerRef.current = new RouteFollower(plan, res.route);
+    followerRef.current = new RouteFollower(plan, res.route, followerOptions(walls));
     zone.current = null;
     setInfo(followerRef.current.describe());
     chimeGood();
@@ -622,6 +659,10 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
       accessibilityRole="button"
       accessibilityLabel="안내 다시 듣기"
     >
+      {/* 안내 화면을 완전히 종료할 때까지 계속 점멸한다. 도착·안전정지 뒤에도
+          주변 사람이 대피자를 찾는 신호는 필요하므로 상태로 끄지 않는다. */}
+      <EmergencyTorch />
+
       {/* 위 — 어디 건물인가 */}
       <View style={styles.header} pointerEvents="none">
         {/* 시연용 도면은 실재하지 않는 건물이다. 시각장애인에게는 음성으로 알렸지만
@@ -679,6 +720,10 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
             tracking={tracking}
             heading={sensor.stability >= STABILITY_FLOOR ? sensor.heading : null}
             imageUri={planImage}
+            walls={walls}
+            routePoints={followerRef.current?.path}
+            scenario={scenario}
+            scenarioPosition={scenario ? followerRef.current?.position() : null}
             realBeacons={realBeacons.current}
             mapped={mapped}
           />

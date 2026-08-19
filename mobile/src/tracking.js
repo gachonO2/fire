@@ -100,14 +100,28 @@ export class Tracking {
    * 늦게 도착할 수 있으므로(맥→서버→폰) 걸음 몇 개만큼 어긋난다. 지점 단위
    * 해상도에서는 그 정도가 문제되지 않지만, 그래서 신뢰도는 직접 들은 것보다 낮게 둔다.
    */
-  pushRemoteFix(nodeId, { holdCount = 2 } = {}) {
+  pushRemoteFix(nodeId, { holdCount = 2, trusted = false } = {}) {
     if (!nodeId || !this.plan.hasNode(nodeId)) return false;
 
     if (nodeId === this._lastRemote) {
-      // 같은 지점이 계속 오면 확인만 한다 — 앵커를 다시 놓으면 걸음이 되감긴다
       this._pending = null;
-      this.fusion.confirm('beacon');
-      return false;
+      // 이미 그 지점을 믿고 있으면 **확인만** 한다 — 앵커를 다시 놓으면 걸음이 되감긴다.
+      //
+      // 그런데 아직 못 옮겨 갔으면 다시 밀어야 한다. 판단 계층은 «걸어온 거리로
+      // 닿을 수 없는 앵커» 를 한 번에 믿지 않고 후보로만 넣는데(다중경로 반사로
+      // 멀리 있는 비콘이 한 번 세게 잡히는 일이 있다), 그 설계는 **다음 스캔에
+      // 또 들어와서 결국 이긴다** 는 전제 위에 서 있다.
+      //
+      // 여기서 같은 지점을 «확인» 으로 삼켜 버리면 그 다음 스캔이 영영 안 온다.
+      // 한 번 0.3 만큼 밀고 끝나서, 전파가 아무리 옳은 답을 계속 보내도 점은
+      // 옛 자리에 붙박인다. 실제로 지점 사이가 34~118 걸음인 도면에서 예산은
+      // 6 걸음이라, 모든 이동이 이 경우에 걸렸다.
+      if (this.fusion.position()?.nodeId === nodeId) {
+        this.fusion.confirm('beacon');
+        return false;
+      }
+      this.fusion.anchorAt(nodeId, { kind: 'beacon', trusted });
+      return true;
     }
 
     // **바뀐 지점은 몇 번 이어질 때만 받아들인다.**
@@ -123,7 +137,10 @@ export class Tracking {
 
     this._pending = null;
     this._lastRemote = nodeId;
-    this.fusion.anchorAt(nodeId, { kind: 'beacon' });
+    // `trusted` 는 **전파만 믿는 화면**을 위한 것이다. 거리 검사를 건너뛰고 그
+    // 자리로 확정한다 — 걸음도 나침반도 없는 화면에서는 검사에 쓸 근거가 없고,
+    // 그 화면의 계약이 «서버가 말하는 곳을 그대로 보여준다» 이기 때문이다.
+    this.fusion.anchorAt(nodeId, { kind: 'beacon', trusted });
     return true;
   }
 
@@ -149,6 +166,16 @@ export class Tracking {
 
   /** {x, y, from, to, progress, nodeId, edgeId} 또는 null */
   position() { return this.fusion.position(); }
+
+  /**
+   * 도면 위쪽이 실제 몇 도인지 알려 준다 — 이걸 넣어야 나침반이 일을 한다.
+   *
+   * 도면에 값이 없으면 `observeHeading` 은 아무것도 하지 않는다(기준이 달라서
+   * 비교하면 전부 틀린 값으로 깎게 된다). 그래서 걸어서 알아낸 값을 여기로 넣는다.
+   */
+  setNorthOffset(deg) {
+    this.plan.setNorthOffset?.(deg);
+  }
 
   /** 층이 바뀌었나 — 화면이 새 층 도면으로 갈아 끼워야 한다 */
   get floorOffset() { return this.altitude.floorOffset; }

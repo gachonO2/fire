@@ -116,10 +116,71 @@ export class Api {
    */
   getBeaconFix() { return this._fetch('/api/beacon-fix'); }
 
+  /** 답사 결과 — 몇 지점을 등록했는지 보여 주는 데 쓴다 */
+  getBeaconMap() { return this._fetch('/api/beacon-map'); }
+
+  /**
+   * 지자기 재현성 — 한 지점을 한 번 잰 결과를 서버에 더한다.
+   *
+   * 같은 지점을 두 번 이상 보내야 판정이 나온다. 그게 «재현성» 의 뜻이고,
+   * 이 검사가 통과하지 못하면 지자기는 접는다.
+   */
+  postMagneticVisit(spot, samples) {
+    return this._fetch('/api/magnetic/visit', {
+      method: 'POST', body: JSON.stringify({ spot, samples }),
+    });
+  }
+
+  getMagnetic() { return this._fetch('/api/magnetic'); }
+
+  /** 통로 지문 저장. 재현성이 «쓸 수 없음» 이면 서버가 거부한다. */
+  putMagneticPrint(edgeId, samples) {
+    return this._fetch(`/api/magnetic/print/${encodeURIComponent(edgeId)}`, {
+      method: 'PUT', body: JSON.stringify({ samples }),
+    });
+  }
+
+  /** 도면에 얹을 지문 묶음 — `MagneticMatcher` 가 이걸 먹는다 */
+  getMagneticPrints() { return this._fetch('/api/magnetic/prints'); }
+
+  /**
+   * 도면에서 읽어낸 벽 — **선이 벽을 뚫는지 보는 데 쓴다.**
+   *
+   * 관제는 이미 이 값을 쓰고 있었고 앱만 몰랐다. 그래서 앱 지도는 통로를 곧게
+   * 이어 벽을 가로질렀다. 같은 도면을 두 화면이 다르게 그리고 있던 셈이다.
+   */
+  getPlanWalls(planId) { return this._fetch(`/api/plans/${encodeURIComponent(planId)}/walls`); }
+
   /** 도면 사진 — 지도 배경으로 깐다. 큰 data URI 라 한 번만 받아 캐시한다. */
-  getPlanImage(planId) { return this._fetch(`/api/plans/${encodeURIComponent(planId)}/image`); }
+  /**
+   * 도면 사진.
+   *
+   * 정리본(`/floor`, 글씨·배경을 지운 PNG)을 먼저 본다 — 원본은 base64 데이터
+   * URI 라 867KB 인데 정리본은 198KB 다. 폰이 LAN 으로 받는 값이라 이 차이가
+   * 그대로 «도면 뜨는 시간» 이 된다. 정리본이 없는 도면이면 원본으로 물러선다.
+   */
+  async getPlanImage(planId) {
+    const id = encodeURIComponent(planId);
+    try {
+      const r = await fetch(`${this.baseUrl}/api/plans/${id}/floor`);
+      if (r.ok) return { dataUri: `${this.baseUrl}/api/plans/${id}/floor` };
+    } catch (_) { /* 서버가 정리본을 안 주면 원본으로 */ }
+    return this._fetch(`/api/plans/${id}/image`);
+  }
   /** 시뮬레이션에서 "지금 서 있는 곳" — 실물 매핑이 쌓이면 안 쓰인다 */
   getStandNode() { return this._fetch('/api/demo/stand'); }
+  /**
+   * 걸어서 알아낸 북쪽 보정을 저장한다.
+   *
+   * 한 번만 재면 되는 값이다 — 건물이 돌아가지 않으니까. 저장해 두면 다음 사람은
+   * 곧게 네 걸음을 걷지 않아도 첫 순간부터 방향 안내를 받는다.
+   */
+  setPlanNorth(planId, northOffset, note) {
+    return this._fetch(`/api/plans/${encodeURIComponent(planId)}/north`, {
+      method: 'PUT', body: JSON.stringify({ northOffset, note }),
+    });
+  }
+
   /** 걸어서 잰 축척을 저장한다 — 모든 거리 안내가 이 값으로 다시 계산된다 */
   setPlanScale(planId, metersPerUnit, note) {
     return this._fetch(`/api/plans/${encodeURIComponent(planId)}/scale`, {

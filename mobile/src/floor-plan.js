@@ -60,8 +60,21 @@ export class FloorPlan {
    * 하지만 "폰을 이쪽으로 돌리세요" 같은 **절대 방향 안내**는 이게 있어야 한다.
    */
   get northOffset() {
+    if (Number.isFinite(this._northOffset)) return ((this._northOffset % 360) + 360) % 360;
     const v = this.plan.northOffset;
     return Number.isFinite(v) ? ((v % 360) + 360) % 360 : null;
+  }
+
+  /**
+   * 걸어서 알아낸 보정값을 넣는다 (`mobile/src/calibrate.js`).
+   *
+   * 이게 없어서 **나침반이 판단 계층에서 통째로 죽어 있었다.** 안내 화면은 걸으며
+   * 보정을 알아내 경로 안내기(`RouteFollower`)에만 넣었는데, 후보를 감점하는 쪽은
+   * 도면을 본다. 도면에는 값이 없으니 `observeHeading` 이 매번 그냥 돌아갔다 —
+   * 방위를 재고 있으면서 아무 데도 쓰지 않은 셈이다.
+   */
+  setNorthOffset(deg) {
+    this._northOffset = Number.isFinite(deg) ? ((deg % 360) + 360) % 360 : null;
   }
 
   /** 실제 나침반 기준 방위. northOffset 을 모르면 null — 모르면 안내하지 않는다. */

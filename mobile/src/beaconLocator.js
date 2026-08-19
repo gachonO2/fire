@@ -22,6 +22,7 @@
  */
 
 import { BeaconLocator } from './positioning';
+import { available as bleAvailable, startScan } from './ble';
 import { simulateScan, withVirtualBeacons } from './beaconSim';
 
 /** 스캔 주기(ms) — 실제 BLE 광고 주기와 같은 규모 */
@@ -94,7 +95,62 @@ function standPosition(plan) {
  * 일반 BLE 면 광고 이름이나 서비스 UUID 를 `beaconId` 로 쓴다.
  */
 function scanOnce(plan, now) {
+  // **진짜 전파가 있으면 그것을 쓴다.** 가상 신호와 섞지 않는다 — 섞으면
+  // 가상이 만든 위치로 실제 신호를 해석하는 순환이 되어, 아무리 걸어도 진짜가
+  // 되지 않는다.
+  if (bleAvailable()) return realScans(now);
   return simulateScan(plan, standPosition(plan), now);
+}
+
+// ── 폰이 직접 듣는 경로 ───────────────────────────────────────────────────
+//
+// BLE 광고는 **밀려서 들어온다.** 판정기는 «지금 이 순간의 목록» 을 달라고
+// 당겨 가므로, 들어오는 것을 모아 두었다가 최근 것만 건네준다.
+//
+// 같은 비콘이 창 안에서 여러 번 들어오면 **중앙값**을 쓴다. RSSI 는 정지
+// 상태에서도 ±10dBm 튀는데, 마지막 값 하나를 그대로 쓰면 그 튐이 그대로
+// 판정에 들어간다. (맥 스캐너도 같은 규칙이다)
+
+/** 이 시간보다 오래된 관측은 버린다 */
+const REAL_WINDOW_MS = 1500;
+
+let realStop = null;
+let realBuf = [];
+
+/** 스캔을 켠다. 이미 켜져 있으면 아무 일도 안 한다. */
+export function startRealScan(onError = null) {
+  if (realStop || !bleAvailable()) return;
+  realStop = startScan(r => {
+    realBuf.push({ ...r, ts: Date.now() });
+  }, onError);
+}
+
+/** 스캔을 끈다 — 화면을 닫을 때. 켜 둔 채로 두면 배터리를 먹는다. */
+export function stopRealScan() {
+  realStop?.();
+  realStop = null;
+  realBuf = [];
+}
+
+/** 지금 들리는 것들. 판정기가 바로 먹을 수 있는 모양으로 낸다. */
+function realScans(now) {
+  const t = now || Date.now();
+  realBuf = realBuf.filter(r => t - r.ts <= REAL_WINDOW_MS);
+
+  const byId = new Map();
+  for (const r of realBuf) {
+    if (!byId.has(r.beaconId)) byId.set(r.beaconId, []);
+    byId.get(r.beaconId).push(r.rssi);
+  }
+  return [...byId].map(([beaconId, list]) => {
+    list.sort((a, b) => a - b);
+    return { beaconId, rssi: list[Math.floor(list.length / 2)], ts: t };
+  });
+}
+
+/** 지금 몇 개가 들리나 — 화면이 «듣고 있다» 를 보여줄 때 쓴다 */
+export function realHeardCount() {
+  return new Set(realBuf.map(r => r.beaconId)).size;
 }
 
 /**
@@ -110,6 +166,7 @@ function scanOnce(plan, now) {
  *   실기기 구현에서는 무시된다 — 진짜 전파에는 "어디서 쟀는지"를 넣을 수 없다.
  */
 export function scanBeacons(plan, now, simPos = null) {
+  if (bleAvailable()) return realScans(now);
   return simulateScan(plan, simPos || standPosition(plan), now);
 }
 
@@ -119,7 +176,9 @@ export function scanBeacons(plan, now, simPos = null) {
  */
 export function createBeaconLocator() {
   return {
-    simulated: true,
+    // 진짜 전파를 듣고 있으면 시뮬레이션이 아니다. 화면이 «가상 비콘» 배지를
+    // 띄울지 말지를 이 값으로 정하므로, 여기서 거짓말하면 검증이 무의미해진다.
+    get simulated() { return !bleAvailable(); },
 
     async locate(plan) {
       if (!plan?.nodes?.length) return null;
@@ -132,13 +191,27 @@ export function createBeaconLocator() {
 
       const locator = new BeaconLocator(bp);
 
-      // 실제 BLE 라면 여기서 3초간 실시간으로 모은다. 시뮬레이션은 기다릴 이유가
-      // 없으므로 시계만 앞으로 감는다 — 평활·유지시간 판정은 그대로 다 거친다.
-      const t0 = Date.now();
-      for (let t = 0; t <= WINDOW_MS; t += TICK_MS) {
-        const now = t0 + t;
-        locator.addScans(scanOnce(bp, now));
-        locator.estimate(now);
+      if (bleAvailable()) {
+        // **진짜 전파는 기다려야 한다.** 시계를 감을 수 없다 — 광고가 실제로
+        // 도착해야 하기 때문이다. 3초 동안 실시간으로 모으며 판정한다.
+        startRealScan();
+        const t0 = Date.now();
+        while (Date.now() - t0 <= WINDOW_MS) {
+          const now = Date.now();
+          locator.addScans(scanOnce(bp, now));
+          locator.estimate(now);
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise(r => setTimeout(r, TICK_MS));
+        }
+      } else {
+        // 시뮬레이션은 기다릴 이유가 없으므로 시계만 앞으로 감는다 —
+        // 평활·유지시간 판정은 그대로 다 거친다.
+        const t0 = Date.now();
+        for (let t = 0; t <= WINDOW_MS; t += TICK_MS) {
+          const now = t0 + t;
+          locator.addScans(scanOnce(bp, now));
+          locator.estimate(now);
+        }
       }
 
       // 확정되지 않았으면 모른다고 한다. 아무 지점이나 돌려주면 엉뚱한 곳에서

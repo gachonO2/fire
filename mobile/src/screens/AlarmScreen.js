@@ -17,25 +17,19 @@
  * **주변에 자기 위치를 알리는** 수단이다.
  */
 
-import { useEffect, useRef, useState } from 'react';
-import {
-  AccessibilityInfo, Animated, Pressable, StyleSheet, Text, View,
-} from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useEffect, useRef } from 'react';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Speech from 'expo-speech';
 
 import { startSiren, stopSiren } from '../sound';
 import { say, stopSpeaking } from '../announce';
 import { alarmBurst } from '../haptics';
-import { theme } from '../theme';
+import EmergencyTorch from '../EmergencyTorch';
 
 const ANNOUNCE_TIMES = 3;
 
 export default function AlarmScreen({ event, onAcknowledge }) {
-  const [permission] = useCameraPermissions();
-  const [torchOn, setTorchOn] = useState(false);
   const pulse = useRef(new Animated.Value(0)).current;
-  const torchTimer = useRef(null);
 
   useEffect(() => {
     startSiren();
@@ -56,9 +50,6 @@ export default function AlarmScreen({ event, onAcknowledge }) {
     };
     speak(0);
 
-    // 손전등 점멸 — 주변에 알리는 신호
-    torchTimer.current = setInterval(() => setTorchOn(v => !v), 480);
-
     Animated.loop(Animated.sequence([
       Animated.timing(pulse, { toValue: 1, duration: 420, useNativeDriver: true }),
       Animated.timing(pulse, { toValue: 0, duration: 420, useNativeDriver: true }),
@@ -67,7 +58,6 @@ export default function AlarmScreen({ event, onAcknowledge }) {
     return () => {
       stopSiren();
       stopSpeaking();
-      clearInterval(torchTimer.current);
     };
   }, []);
 
@@ -84,9 +74,7 @@ export default function AlarmScreen({ event, onAcknowledge }) {
     >
     <Animated.View style={[styles.root, { backgroundColor: bg }]} pointerEvents="none">
       {/* 화면 밖으로 안 보이게 두되 손전등만 켠다 */}
-      {permission?.granted && (
-        <CameraView style={styles.hiddenCam} facing="back" enableTorch={torchOn} />
-      )}
+      <EmergencyTorch intervalMs={480} />
 
       <View style={styles.body}>
         <Text style={styles.icon}>🔥</Text>
@@ -110,7 +98,6 @@ export default function AlarmScreen({ event, onAcknowledge }) {
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   root: { flex: 1, alignItems: 'center', justifyContent: 'space-between', paddingVertical: 90 },
-  hiddenCam: { position: 'absolute', width: 1, height: 1, opacity: 0 },
   body: { alignItems: 'center', gap: 10, paddingHorizontal: 24 },
   icon: { fontSize: 96 },
   title: { color: '#fff', fontSize: 48, fontWeight: '900', letterSpacing: -1 },

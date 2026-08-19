@@ -40,6 +40,12 @@ const FILES = [
   'tracking.js',        // 판단 계층 + 세 앵커 묶음 (화면이 쓰는 입구)
   'walk-sim.js',        // 가상 보행자 — 시뮬레이션의 '실제 위치'
   'beacon-map.js',      // 걸으면서 비콘 위치 알아내기
+  'step-detect.js',     // 걸음 검출 — 흔든 것과 걸은 것을 가른다
+  'north.js',           // 북쪽 보정 — 도면 위쪽이 실제 몇 도인가
+  'orthogonal.js',      // 직각 통로 그리기 — 앱과 관제가 같은 기하를 쓴다
+  'wall-route.js',      // 벽을 피해 가는 길 — 안내와 그림이 같은 함수를 쓴다
+  'ble-decode.js',      // BLE 광고 → 비콘 이름. 맥 스캐너와 같은 규칙
+  'photo-scenario.js',  // 관제 사진 시나리오 — 앱 지도도 같은 위치·경로를 쓴다
 ];
 
 try {

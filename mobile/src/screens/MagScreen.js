@@ -49,7 +49,10 @@ const VERDICT = {
   insufficient: { color: theme.textDim, label: '표본이 모자랍니다' },
 };
 
-export default function MagScreen({ onClose }) {
+export default function MagScreen({ onClose, api }) {
+  // 서버에 남긴 횟수. 걷고 와서 화면을 닫으면 사라지던 값이라, 남았는지가
+  // 화면에 보여야 «다시 걸어야 하나» 를 고민하지 않는다.
+  const [saved, setSaved] = useState(0);
   const [mag, setMag] = useState(null);          // 지금 |B|
   const [available, setAvailable] = useState(null);
   const [spots, setSpots] = useState([]);        // [{ id, visits: [[번호]] }]
@@ -99,6 +102,12 @@ export default function MagScreen({ onClose }) {
         else next.push({ id: active, visits: [samples] });
         return next.sort((a, b) => a.id - b.id);
       });
+
+      // **서버에 남긴다.** 건물을 걸어야 나오는 값이라 화면 상태로만 두면
+      // 화면을 닫는 순간 사라지고 다시 걸어야 한다.
+      api?.postMagneticVisit?.(`지점 ${active}`, samples)
+        .then(r => { if (r?.visits) setSaved(r.visits); })
+        .catch(() => {});
     }, SAMPLE_MS);
   }
 

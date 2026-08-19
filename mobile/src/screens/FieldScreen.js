@@ -32,6 +32,7 @@ import { Barometer, Magnetometer } from 'expo-sensors';
 
 import { Odometry } from '../odometry';
 import { BearingSensor } from '../bearing';
+import { northFromWalk } from '../north';
 import { theme } from '../theme';
 
 /** GuideScreen 의 STABILITY_FLOOR 와 같은 값 — 이 아래면 방향 안내가 꺼진다 */
@@ -39,7 +40,7 @@ const STABILITY_FLOOR = 0.25;
 /** 1 hPa ≈ 8.33 m (해수면 근처) */
 const M_PER_HPA = 8.33;
 
-export default function FieldScreen({ onClose, api = null, plan = null }) {
+export default function FieldScreen({ onClose, api = null, plan = null, onSaved = null }) {
   const odo = useRef(new Odometry()).current;
   const sensor = useRef(new BearingSensor()).current;
 
@@ -65,6 +66,10 @@ export default function FieldScreen({ onClose, api = null, plan = null }) {
   const [scaleTo, setScaleTo] = useState(null);
   const [scaleRun, setScaleRun] = useState(null);
   const [scaleResult, setScaleResult] = useState(null);
+  // 같은 걷기에서 북쪽 보정도 같이 나온다 — 따로 걸을 이유가 없다
+  const headings = useRef(null);   // 측정 중일 때만 배열 — 평소엔 모으지 않는다
+  const [northResult, setNorthResult] = useState(null);
+  const [northSaved, setNorthSaved] = useState(false);
   const [saved, setSaved] = useState(false);
 
   const refHpa = useRef(null);
@@ -82,6 +87,12 @@ export default function FieldScreen({ onClose, api = null, plan = null }) {
       if (!alive) return;
       setHeading(sensor.heading);
       setStability(sensor.stability);
+      // 축척을 재는 동안의 방위를 모은다. 흔들리는 표본은 여기서 버린다 —
+      // 나중에 평균 내면 이미 섞여 버려서 걸러낼 수 없다.
+      if (headings.current && sensor.stability >= STABILITY_FLOOR
+          && Number.isFinite(sensor.heading)) {
+        headings.current.push(sensor.heading);
+      }
 
       const h = stabHits.current;
       h.n++;
@@ -104,11 +115,31 @@ export default function FieldScreen({ onClose, api = null, plan = null }) {
       Magnetometer.setUpdateInterval(200);
       magSub = Magnetometer.addListener(({ x, y, z }) => {
         const b = Math.sqrt(x * x + y * y + z * z);
-        // 축척 계산에 쓸 보폭 — 방금 잰 값이 있으면 그걸, 없으면 도면 값
+        const r = magRange.current;
+        r.lo = Math.min(r.lo, b); r.hi = Math.max(r.hi, b);
+        setMag(b);
+      });
+    }).catch(() => {});
+
+    return () => {
+      alive = false;
+      clearInterval(tick);
+      baro?.remove?.();
+      magSub?.remove?.();
+      odo.stop();
+      sensor.stop();
+    };
+  }, []);
+
+  // ── 축척: 두 지점 사이를 걸어 «도면 1픽셀 = 몇 미터» 를 낸다
+  //
+  // 보폭은 방금 잰 값이 있으면 그걸, 없으면 도면 값을 쓴다.
   const strideM = strideResult?.stride ?? plan?.stepLength ?? 0.7;
 
   function scaleStart() {
     setScaleResult(null); setSaved(false);
+    setNorthResult(null); setNorthSaved(false);
+    headings.current = [];
     setScaleRun({ from: odo.steps });
   }
   async function scaleEnd() {
@@ -129,29 +160,30 @@ export default function FieldScreen({ onClose, api = null, plan = null }) {
       widthM: (plan.image?.width || 0) * mpu,
       before: plan.metersPerUnit,
     });
+
+    // **같은 걷기에서 북쪽도 나온다.** A→B 를 걸었다는 사실이 이미 선언돼 있으니
+    // 걷는 동안의 나침반 평균과 도면 안 각도의 차이가 곧 보정값이다.
+    // 안내 화면처럼 «곧게 네 걸음이면 그 방향일 것» 이라고 추측하지 않는다 —
+    // 반대로 걸어서 180° 틀어진 값이 박히는 일이 여기서는 생기지 않는다.
+    const got = northFromWalk(headings.current, a, b);
+    headings.current = null;
+    setNorthResult({ ...got, before: plan.northOffset });
   }
   async function scaleSave() {
     if (!scaleResult?.mpu || !plan?.id) return;
     const ok = await api?.setPlanScale?.(plan.id, scaleResult.mpu,
       `걸음 ${scaleResult.walked} × 보폭 ${strideM.toFixed(3)}m`).catch(() => null);
     setSaved(!!ok);
+    if (ok) await onSaved?.()?.catch?.(() => {});
   }
 
-  const r = magRange.current;
-        r.lo = Math.min(r.lo, b); r.hi = Math.max(r.hi, b);
-        setMag(b);
-      });
-    }).catch(() => {});
-
-    return () => {
-      alive = false;
-      clearInterval(tick);
-      baro?.remove?.();
-      magSub?.remove?.();
-      odo.stop();
-      sensor.stop();
-    };
-  }, []);
+  async function northSave() {
+    if (!Number.isFinite(northResult?.offset) || !plan?.id) return;
+    const ok = await api?.setPlanNorth?.(plan.id, northResult.offset,
+      `${northResult.samples}표본 · 흔들림 ${Math.round(northResult.spread)}°`).catch(() => null);
+    setNorthSaved(!!ok);
+    if (ok) await onSaved?.()?.catch?.(() => {});
+  }
 
   // ── 보폭: 알려진 거리를 걷고 걸음 수로 나눈다
   function strideStart() {
@@ -288,8 +320,8 @@ export default function FieldScreen({ onClose, api = null, plan = null }) {
 
         {/* ③ 축척 */}
         <Section
-          title="③ 축척 (픽셀 → 미터)"
-          why="도면의 1픽셀이 몇 미터인지. 지금은 AI 추정값이라 「출구까지 8m」가 실제로는 12m 일 수 있다."
+          title="③ 축척 + 북쪽 (한 번 걸어 둘 다)"
+          why="1픽셀이 몇 미터인지, 그리고 도면 위쪽이 실제 몇 도인지. 북쪽을 모르면 「폰을 이쪽으로 돌리세요」가 통째로 꺼진다 — 어느 쪽을 보고 서 있든 「직진」만 나온다."
         >
           {!plan ? (
             <Text style={s.hint}>도면을 아직 받지 못했습니다.</Text>
@@ -328,6 +360,32 @@ export default function FieldScreen({ onClose, api = null, plan = null }) {
                     <Pressable style={[s.btn, saved && { backgroundColor: theme.ok }]}
                       onPress={scaleSave} accessibilityRole="button">
                       <Text style={s.btnText}>{saved ? '저장됨 ✓' : '이 축척으로 저장'}</Text>
+                    </Pressable>
+                  )}
+                </>
+              )}
+
+              {/* 같은 걷기에서 북쪽도 나온다 — 방향 안내 전체가 이 값 하나에 걸려 있다 */}
+              {northResult && (
+                <>
+                  <Result
+                    error={northResult.error}
+                    lines={northResult.error ? [] : [
+                      ['걸으며 잰 방위', `${northResult.bearing.toFixed(0)}°`],
+                      ['도면 안 각도', `${northResult.planDeg.toFixed(0)}°`],
+                      ['도면 위쪽 = 실제', `${northResult.offset.toFixed(0)}°`],
+                      ['지금 값', northResult.before === null || northResult.before === undefined
+                        ? '없음 (방향 안내 꺼짐)' : `${Number(northResult.before).toFixed(0)}°`],
+                      ['표본', `${northResult.samples}개 · 흔들림 ${Math.round(northResult.spread)}°`],
+                    ]}
+                    note="저장하면 진동·소리 방향 안내가 켜집니다. 지금은 이 값이 없어 꺼져 있습니다."
+                  />
+                  {!northResult.error && (
+                    <Pressable style={[s.btn, northSaved && { backgroundColor: theme.ok }]}
+                      onPress={northSave} accessibilityRole="button">
+                      <Text style={s.btnText}>
+                        {northSaved ? '저장됨 ✓' : '이 북쪽으로 저장'}
+                      </Text>
                     </Pressable>
                   )}
                 </>

@@ -22,10 +22,7 @@
 
 import { Accelerometer } from 'expo-sensors';
 
-const ALPHA = 0.8;            // 중력 분리용 저역통과 계수 (원본 Visual_Slam 값)
-const PEAK_THRESHOLD = 0.18;  // g 단위 — 이보다 큰 봉우리를 걸음으로 본다
-const MIN_STEP_MS = 260;      // 이보다 빨리 또 세지 않는다 (한 걸음이 두 번 세지는 것 방지)
-const MAX_STEP_MS = 2000;     // 이보다 느리면 걷다 멈춘 것으로 본다
+import { StepDetector } from './step-detect.js';
 
 /** 한 걸음마다 깎이는 확신도. 40걸음쯤 걸으면 경고 수준에 닿는다. */
 const CONF_DECAY_PER_STEP = 0.012;
@@ -37,10 +34,9 @@ export class Odometry {
     this.walking = false;
     this.onStep = null;         // (steps) => void
 
-    this._gravity = { x: 0, y: 0, z: 0 };
-    this._lastPeakAt = 0;
-    this._prevMag = 0;
-    this._rising = false;
+    // 봉우리를 세는 일은 `shared/step-detect.js` 가 한다 — 시간을 인자로 받는
+    // 순수 계층이라 «흔든 것과 걸은 것» 을 시험으로 가릴 수 있다.
+    this._detector = new StepDetector();
     this._sub = null;
   }
 
@@ -57,40 +53,19 @@ export class Odometry {
   reset() {
     this.steps = 0;
     this.confidence = 1;
-    this._lastPeakAt = 0;
+    this._detector.reset();
   }
 
-  _sample({ x, y, z }) {
-    // 중력은 천천히 변하므로 저역통과로 뽑아내고, 나머지가 몸의 움직임이다
-    this._gravity.x = ALPHA * this._gravity.x + (1 - ALPHA) * x;
-    this._gravity.y = ALPHA * this._gravity.y + (1 - ALPHA) * y;
-    this._gravity.z = ALPHA * this._gravity.z + (1 - ALPHA) * z;
-
-    const lx = x - this._gravity.x;
-    const ly = y - this._gravity.y;
-    const lz = z - this._gravity.z;
-    const mag = Math.sqrt(lx * lx + ly * ly + lz * lz);
-
+  _sample(g) {
     const now = Date.now();
-
-    // 봉우리 검출: 올라가다가 내려가기 시작하는 순간이 한 걸음
-    if (mag > this._prevMag) {
-      this._rising = true;
-    } else if (this._rising && this._prevMag >= PEAK_THRESHOLD) {
-      this._rising = false;
-      if (now - this._lastPeakAt >= MIN_STEP_MS) {
-        this._lastPeakAt = now;
-        this.steps++;
-        this.confidence = Math.max(0, this.confidence - CONF_DECAY_PER_STEP);
-        this.walking = true;
-        this.onStep?.(this.steps);
-      }
-    } else {
-      this._rising = false;
+    // 리듬이 확인되는 순간 보류해 둔 걸음이 함께 나온다 — 그래서 1이 아닐 수 있다
+    const n = this._detector.push(g, now);
+    for (let i = 0; i < n; i++) {
+      this.steps++;
+      this.confidence = Math.max(0, this.confidence - CONF_DECAY_PER_STEP);
+      this.onStep?.(this.steps);
     }
-    this._prevMag = mag;
-
-    if (now - this._lastPeakAt > MAX_STEP_MS) this.walking = false;
+    this.walking = this._detector.walking(now);
   }
 
   /** 방향을 크게 벗어난 채로 걸으면 위치를 더 못 믿는다 */
