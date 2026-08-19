@@ -51,6 +51,7 @@ function photoTimelinePayload(snapshot, extra = {}) {
     remainingMeters: snapshot.remainingMeters,
     routeNodes: [PHOTO_SCENARIO.startNodeId, PHOTO_SCENARIO.exitNodeId],
     routeEdges: ['e7'],
+    beacons: snapshot.beacons,
     scenarioDurationMs: PHOTO_SCENARIO.durationMs,
     timelineState: snapshot.timelineState,
     ...extra,

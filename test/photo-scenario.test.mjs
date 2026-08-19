@@ -1,5 +1,5 @@
 import {
-  PHOTO_SCENARIO, pointOnRoute, photoScenarioSnapshot,
+  PHOTO_SCENARIO, pointOnRoute, photoScenarioSnapshot, scenarioBeaconReadings,
 } from '../shared/photo-scenario.js';
 import { RouteFollower } from '../mobile/src/route.js';
 
@@ -47,6 +47,17 @@ follower.seekProgress(1);
 const phoneEnd = follower.position();
 expect('90초 휴대폰도 같은 탈출구에서 멈춤',
   phoneEnd.x === end.x && phoneEnd.y === end.y);
+
+expect('탈출 경로에 시연용 비콘 4개 배치',
+  PHOTO_SCENARIO.beacons.length === 4 &&
+  PHOTO_SCENARIO.beacons.every(b => b.id.startsWith('SIM-EXIT-')));
+const startSignals = scenarioBeaconReadings(start);
+const atFirstBeacon = scenarioBeaconReadings(PHOTO_SCENARIO.beacons[0]);
+expect('서버 스냅샷에 네 비콘 RSSI 포함',
+  start.beacons.length === 4 && start.beacons.every(b => Number.isFinite(b.rssi)));
+expect('비콘에 가까워지면 해당 RSSI가 강해짐',
+  atFirstBeacon[0].rssi > startSignals[0].rssi,
+  `${startSignals[0].rssi} → ${atFirstBeacon[0].rssi} dBm`);
 
 if (failed) process.exit(1);
 console.log('\n사진 시나리오 90초 동기화 통과');

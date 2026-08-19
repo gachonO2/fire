@@ -95,6 +95,12 @@ export default function PositionMap({ plan, route, tracking, heading, imageUri =
   const shownRoute = scenario
     ? scenario.route.map(([x, y]) => ({ x, y }))
     : routePoints;
+  const scenarioBeacons = scenario
+    ? (scenarioPosition?.beacons || scenario.beacons || [])
+    : [];
+  const strongestScenarioBeacon = scenarioBeacons
+    .filter(b => Number.isFinite(b.rssi))
+    .sort((a, b) => b.rssi - a.rssi)[0] || null;
 
   // 지도를 **읽어 준다.**
   //
@@ -162,6 +168,24 @@ export default function PositionMap({ plan, route, tracking, heading, imageUri =
               strokeLinecap="round" strokeLinejoin="round" />
           </G>
         )}
+
+        {/* 탈출선에 둔 시연 비콘. 보라색과 SIM 식별자로 실제 장비와 구분한다. */}
+        {scenario && scenarioBeacons.map(beacon => {
+          const size = box.s * 0.65;
+          const shortId = beacon.id.replace('SIM-EXIT-', '');
+          const value = Number.isFinite(beacon.rssi) ? ` ${beacon.rssi}` : '';
+          return (
+            <G key={beacon.id}>
+              <Circle cx={beacon.x} cy={beacon.y} r={box.s * 1.5}
+                fill={theme.map.beacon} fillOpacity={0.1} />
+              <Path d={`M ${beacon.x} ${beacon.y - size} L ${beacon.x + size} ${beacon.y} L ${beacon.x} ${beacon.y + size} L ${beacon.x - size} ${beacon.y} Z`}
+                fill={theme.map.beacon} stroke="#f4e8ff" strokeWidth={box.s * 0.14} />
+              <SvgText x={beacon.x} y={beacon.y - box.s * 1.15}
+                fontSize={box.s * 0.95} fill="#e4bdff" fontWeight="700"
+                textAnchor="middle">{shortId}{value}</SvgText>
+            </G>
+          );
+        })}
 
         {/* 사진 시나리오의 화재 — 앱도 관제와 같은 빨간 원 하나만 쓴다. */}
         {scenario && (
@@ -232,10 +256,14 @@ export default function PositionMap({ plan, route, tracking, heading, imageUri =
       <View style={s.bar}>
         {/* 비콘 이야기는 비콘 색으로. theme.ok(민트)를 쓰면 출구와 같은 색이라
             «출구 관련 표시인가» 로 읽힌다 — 지도에서 겪은 그 혼동이다. */}
-        <Text style={[s.src, { color: realBeacons ? theme.map.beacon : theme.warn }]}>
-          {realBeacons ? '실제 전파' : '가상 비콘'}
+        <Text style={[s.src, { color: scenario || realBeacons ? theme.map.beacon : theme.warn }]}>
+          {scenario ? '시연 비콘' : realBeacons ? '실제 전파' : '가상 비콘'}
         </Text>
-        <Text style={s.conf}>{realBeacons ? `신호원 ${mapped}개 확정` : '수신기 없음'}</Text>
+        <Text style={s.conf}>
+          {scenario
+            ? `${scenarioBeacons.length}개${strongestScenarioBeacon ? ` · ${strongestScenarioBeacon.id.replace('SIM-EXIT-', '')} ${strongestScenarioBeacon.rssi} dBm` : ''}`
+            : realBeacons ? `신호원 ${mapped}개 확정` : '수신기 없음'}
+        </Text>
       </View>
     </View>
   );

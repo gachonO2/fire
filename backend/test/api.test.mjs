@@ -117,7 +117,8 @@ expect('휴대폰 진입 시 90초 공용 타임라인 시작',
 const livePhoto = await api('/api/demo/photo-scenario');
 expect('서버가 관제·휴대폰 공용 좌표를 반환',
   livePhoto.body.userId === 'scenario-cocone-photo' &&
-  Number.isFinite(livePhoto.body.serverNow) && Number.isFinite(livePhoto.body.x));
+  Number.isFinite(livePhoto.body.serverNow) && Number.isFinite(livePhoto.body.x) &&
+  livePhoto.body.beacons?.length === 4 && livePhoto.body.beacons.every(b => Number.isFinite(b.rssi)));
 await api('/api/positions/scenario-cocone-photo', { method: 'DELETE' });
 
 // 15) 경로 요청마다 KPI가 자동 기록됨

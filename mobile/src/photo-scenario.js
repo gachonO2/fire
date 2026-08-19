@@ -26,6 +26,17 @@ const METERS_PER_UNIT = 50 / 1352;
 const STEP_LENGTH = 0.7;
 const TOTAL_METERS = polylineLength(ROUTE) * METERS_PER_UNIT;
 const DURATION_MS = 90_000;
+// 탈출선 위에 놓은 시연용 비콘. 실제 구매·설치 좌표가 정해지기 전까지는
+// `SIM-` 접두어로 실제 장비와 섞이지 않게 한다.
+const BEACONS = Object.freeze([
+  { id: 'SIM-EXIT-B1', progress: 0.18, txPower: -59, biasDb: 2 },
+  { id: 'SIM-EXIT-B2', progress: 0.40, txPower: -59, biasDb: -2 },
+  { id: 'SIM-EXIT-B3', progress: 0.63, txPower: -59, biasDb: 1 },
+  { id: 'SIM-EXIT-B4', progress: 0.84, txPower: -59, biasDb: -1 },
+].map(beacon => {
+  const point = pointOnRoute(ROUTE, beacon.progress);
+  return Object.freeze({ ...beacon, x: point.x, y: point.y });
+}));
 const TOTAL_STEPS = ROUTE.slice(1).reduce((sum, point, i) => {
   const previous = ROUTE[i];
   const meters = Math.hypot(point[0] - previous[0], point[1] - previous[1]) * METERS_PER_UNIT;
@@ -47,6 +58,7 @@ export const PHOTO_SCENARIO = Object.freeze({
   totalMeters: Math.round(TOTAL_METERS * 10) / 10,
   totalSteps: TOTAL_STEPS,
   durationMs: DURATION_MS,
+  beacons: BEACONS,
   scaleNote: '도면 전체 폭 50m 추정 — 현장 실측 후 교체',
 });
 
@@ -82,6 +94,32 @@ export function pointOnRoute(points = ROUTE, progress = 0) {
   return { x: last[0], y: last[1], segment: points.length - 2, segmentProgress: 1 };
 }
 
+/**
+ * 현재 위치에서 보일 시연용 비콘 RSSI를 만든다.
+ * 자유공간 로그 거리 모델의 단순값이며 실제 측정치가 아니다. 같은 서버 스냅샷에
+ * 넣어 관제와 휴대폰이 서로 다른 난수를 만들지 않게 한다.
+ */
+export function scenarioBeaconReadings(position, beacons = BEACONS) {
+  const px = Number(position?.x);
+  const py = Number(position?.y);
+  return beacons.map(beacon => {
+    const distanceMeters = Number.isFinite(px) && Number.isFinite(py)
+      ? Math.hypot(beacon.x - px, beacon.y - py) * METERS_PER_UNIT
+      : 0;
+    const modeledDistance = Math.max(0.5, distanceMeters);
+    const rssi = Math.max(-96, Math.min(-42,
+      Math.round(beacon.txPower - 20 * Math.log10(modeledDistance) + beacon.biasDb)));
+    return {
+      id: beacon.id,
+      x: beacon.x,
+      y: beacon.y,
+      rssi,
+      distanceMeters: Math.round(distanceMeters * 10) / 10,
+      simulated: true,
+    };
+  });
+}
+
 /** 서버 시각 하나로 관제와 휴대폰이 함께 쓰는 90초 대피 상태를 만든다. */
 export function photoScenarioSnapshot(startedAt, now = Date.now()) {
   const running = Number.isFinite(startedAt);
@@ -96,6 +134,7 @@ export function photoScenarioSnapshot(startedAt, now = Date.now()) {
     remainingMs: Math.max(0, DURATION_MS - elapsedMs),
     remainingMeters,
     stepsLeft: Math.ceil(remainingMeters / STEP_LENGTH),
+    beacons: scenarioBeaconReadings(point),
     phase: progress >= 1 ? 'arrived' : 'guiding',
     timelineState: running ? (progress >= 1 ? 'arrived' : 'running') : 'armed',
   };

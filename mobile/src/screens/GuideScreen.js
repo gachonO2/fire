@@ -314,7 +314,12 @@ export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
       const f = followerRef.current;
       f.seekProgress(snapshot.progress);
       const d = f.describe();
-      setScenarioPosition({ x: snapshot.x, y: snapshot.y, progress: snapshot.progress });
+      setScenarioPosition({
+        x: snapshot.x,
+        y: snapshot.y,
+        progress: snapshot.progress,
+        beacons: snapshot.beacons,
+      });
       setInfo({
         ...d,
         stepsLeft: snapshot.stepsLeft,
