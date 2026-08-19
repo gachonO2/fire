@@ -119,8 +119,8 @@ expect('서버가 관제·휴대폰 공용 좌표를 반환',
   livePhoto.body.userId === 'scenario-cocone-photo' &&
   Number.isFinite(livePhoto.body.serverNow) && Number.isFinite(livePhoto.body.x) &&
   Array.isArray(livePhoto.body.beacons) &&
-  livePhoto.body.beacons.every(b => b.mapped && Number.isFinite(b.rssi)));
-expect('답사 매핑이 없는 테스트 도면에는 임의 비콘을 만들지 않음',
+  livePhoto.body.beacons.every(b => (b.mapped || b.virtual) && Number.isFinite(b.rssi)));
+expect('다른 테스트 도면에는 COCONE 경로 가상 비콘을 만들지 않음',
   livePhoto.body.beacons.length === 0);
 await api('/api/positions/scenario-cocone-photo', { method: 'DELETE' });
 

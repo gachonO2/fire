@@ -1109,9 +1109,8 @@ async function refreshSurvey() {
 /**
  * 답사한 지점을 지도에 표시한다.
  *
- * 예전에는 «가상 비콘» 레이어가 43개 지점 전부에서 파동을 울렸다. 실제로 답사한
- * 곳은 7곳인데 화면은 온 층에 비콘이 깔린 것처럼 보였다 — 관제 화면이 할 수
- * 있는 가장 나쁜 거짓말이다. 답사한 곳만, 두께까지 그린다.
+ * 기존 답사 위치와 사용자가 요청한 경로 가상 비콘 2개만 그린다. 가상 비콘도
+ * 기존 마커와 같은 모양을 쓰되 범례와 title에서 가상임을 밝힌다.
  */
 function drawSurvey() {
   const svg = document.getElementById('beacon-waves');
@@ -1122,14 +1121,28 @@ function drawSurvey() {
   if (!vb) return;
   svg.setAttribute('viewBox', vb);
 
-  if (!isOn('show-beacons') || surveyedSpots.size === 0) { svg.innerHTML = ''; return; }
+  const routeBeacons = plan.id === PHOTO_SCENARIO.planId ? PHOTO_SCENARIO.routeBeacons : [];
+  if (!isOn('show-beacons') || (surveyedSpots.size === 0 && routeBeacons.length === 0)) {
+    svg.innerHTML = '';
+    return;
+  }
   const u = Number(vb.split(/\s+/)[2]) / 300;
   const readings = new Map((photoScenarioPosition()?.beacons || [])
     .filter(b => b?.nodeId)
     .map(b => [b.nodeId, b]));
 
-  svg.innerHTML = [...surveyedSpots].map(([nodeId, n]) => {
-    const node = plan.getNode?.(nodeId) || plan.nodes.find(x => x.id === nodeId);
+  const spots = [
+    ...[...surveyedSpots].map(([nodeId, count]) => ({ nodeId, count, virtual: false })),
+    ...routeBeacons.map(beacon => ({
+      nodeId: beacon.nodeId,
+      count: beacon.count,
+      virtual: true,
+      node: { x: beacon.x, y: beacon.y, name: beacon.nodeName },
+    })),
+  ];
+
+  svg.innerHTML = spots.map(({ nodeId, count: n, virtual, node: fixedNode }) => {
+    const node = fixedNode || plan.getNode?.(nodeId) || plan.nodes.find(x => x.id === nodeId);
     if (!node || !Number.isFinite(node.x)) return '';
     // 신호가 두터울수록 크고 진하게 — 어디가 얇은지가 한눈에 보여야 한다
     const w = Math.min(1, n / 6);
@@ -1143,7 +1156,8 @@ function drawSurvey() {
     const reading = readings.get(nodeId);
     const value = isPhotoScenarioActive() && Number.isFinite(reading?.rssi)
       ? `${reading.rssi} dBm` : '';
-    return `<g class="survey-beacon" data-survey-node="${nodeId}">
+    const source = virtual ? '경로 가상 비콘' : '기존 매핑';
+    return `<g class="survey-beacon" data-survey-node="${nodeId}" data-virtual="${virtual}">
       <circle cx="${node.x}" cy="${node.y}" r="${r * 2.1}" fill="${c}" opacity="${0.08 + w * 0.10}"/>
       <circle cx="${node.x}" cy="${node.y}" r="${r}" fill="none" stroke="${c}"
         stroke-width="${u * 0.9}" opacity="${0.5 + w * 0.45}"/>
@@ -1153,7 +1167,7 @@ function drawSurvey() {
       ${value ? `<text x="${node.x}" y="${node.y - r * 1.45}" text-anchor="middle"
         font-size="${u * 3.1}" font-weight="800" fill="#e4bdff"
         paint-order="stroke" stroke="#111820" stroke-width="${u}">${value}</text>` : ''}
-      <title>${node.name} · 기존 매핑 ${n}개${value ? ` · ${value} 시뮬레이션` : ''}</title>
+      <title>${node.name} · ${source} ${n}개${value ? ` · ${value} 시뮬레이션` : ''}</title>
     </g>`;
   }).join('');
 }
@@ -1466,13 +1480,15 @@ function drawWalls() {
 
 function updateBeaconChrome() {
   const real = hasRealBeacons();
-  const any = real || surveyedCount > 0;
+  const routeCount = api.floorPlan?.id === PHOTO_SCENARIO.planId
+    ? PHOTO_SCENARIO.routeBeacons.length : 0;
+  const any = real || surveyedCount > 0 || routeCount > 0;
   const btn = document.getElementById('show-beacons');
   if (btn) {
     btn.disabled = !any;
     btn.style.opacity = any ? '' : '.35';
     btn.title = any
-      ? `비콘 표시 (도면 등록 ${real ? '있음' : '없음'} · 기존 매핑 ${surveyedCount}개)`
+      ? `비콘 표시 (도면 등록 ${real ? '있음' : '없음'} · 기존 매핑 ${surveyedCount}개 · 경로 가상 ${routeCount}개)`
       : '표시할 비콘이 없습니다 — 도면에 비콘 id 가 없고, 답사로 태그한 지점도 없습니다';
   }
   const wave = document.getElementById('show-waves');
@@ -1484,9 +1500,10 @@ function updateBeaconChrome() {
   if (note) {
     note.hidden = false;
     const thin = [...surveyedSpots.values()].filter(n => n <= 2).length;
-    note.textContent = surveyedSpots.size === 0
+    note.textContent = surveyedSpots.size === 0 && routeCount === 0
       ? '비콘 없음 — 답사 전'
-      : `기존 비콘 ${surveyedCount}개 · ${surveyedSpots.size}지점`
+      : (surveyedSpots.size ? `기존 비콘 ${surveyedCount}개 · ${surveyedSpots.size}지점` : '')
+        + (routeCount ? `${surveyedSpots.size ? ' · ' : ''}경로 가상 ${routeCount}개` : '')
         + (isPhotoScenarioActive() ? ' · RSSI 시뮬레이션' : '')
         + (thin ? ` · ${thin}곳 신호 얇음` : '');
     note.style.color = isPhotoScenarioActive() ? 'var(--beacon)' : thin ? 'var(--warn)' : 'var(--muted)';

@@ -98,6 +98,8 @@ export default function PositionMap({ plan, route, tracking, heading, imageUri =
   const scenarioBeacons = scenario
     ? (scenarioPosition?.beacons || [])
     : [];
+  const virtualScenarioCount = scenarioBeacons.filter(b => b.virtual).length;
+  const mappedScenarioCount = scenarioBeacons.length - virtualScenarioCount;
   const strongestScenarioBeacon = scenarioBeacons
     .filter(b => Number.isFinite(b.rssi))
     .sort((a, b) => b.rssi - a.rssi)[0] || null;
@@ -169,18 +171,19 @@ export default function PositionMap({ plan, route, tracking, heading, imageUri =
           </G>
         )}
 
-        {/* 서버 답사에 이미 매핑된 기존 비콘 위치. 숫자는 그 위치의 신호원 수다. */}
+        {/* 기존 답사 위치와 경로 가상 비콘. 숫자는 그 위치의 신호원 수다. */}
         {scenario && scenarioBeacons.map(beacon => {
           const count = beacon.count || beacon.beaconIds?.length || 1;
           const value = Number.isFinite(beacon.rssi) ? `${beacon.rssi} dBm` : '';
+          const markerColor = count <= 2 ? theme.warn : theme.map.beacon;
           return (
             <G key={beacon.id}>
               <Circle cx={beacon.x} cy={beacon.y} r={box.s * 1.5}
-                fill={theme.map.beacon} fillOpacity={0.1} />
+                fill={markerColor} fillOpacity={0.1} />
               <Circle cx={beacon.x} cy={beacon.y} r={box.s * 0.72}
-                fill="none" stroke={theme.map.beacon} strokeWidth={box.s * 0.18} />
+                fill="none" stroke={markerColor} strokeWidth={box.s * 0.18} />
               <SvgText x={beacon.x} y={beacon.y + box.s * 0.28}
-                fontSize={box.s * 0.72} fill={theme.map.beacon} fontWeight="700"
+                fontSize={box.s * 0.72} fill={markerColor} fontWeight="700"
                 textAnchor="middle">{count}</SvgText>
               {value ? <SvgText x={beacon.x} y={beacon.y - box.s * 1.05}
                 fontSize={box.s * 0.72} fill="#e4bdff" fontWeight="700"
@@ -259,11 +262,11 @@ export default function PositionMap({ plan, route, tracking, heading, imageUri =
         {/* 비콘 이야기는 비콘 색으로. theme.ok(민트)를 쓰면 출구와 같은 색이라
             «출구 관련 표시인가» 로 읽힌다 — 지도에서 겪은 그 혼동이다. */}
         <Text style={[s.src, { color: scenario || realBeacons ? theme.map.beacon : theme.warn }]}>
-          {scenario ? '기존 비콘' : realBeacons ? '실제 전파' : '가상 비콘'}
+          {scenario ? '비콘 시뮬레이션' : realBeacons ? '실제 전파' : '가상 비콘'}
         </Text>
         <Text style={s.conf}>
           {scenario
-            ? `${scenarioBeacons.length}지점${strongestScenarioBeacon ? ` · 최강 ${strongestScenarioBeacon.rssi} dBm` : ''}`
+            ? `기존 ${mappedScenarioCount}지점 · 경로 가상 ${virtualScenarioCount}개${strongestScenarioBeacon ? ` · 최강 ${strongestScenarioBeacon.rssi} dBm` : ''}`
             : realBeacons ? `신호원 ${mapped}개 확정` : '수신기 없음'}
         </Text>
       </View>

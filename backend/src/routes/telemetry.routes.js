@@ -61,7 +61,11 @@ function photoTimelinePayload(snapshot, extra = {}) {
 
 async function currentPhotoSnapshot(repo, startedAt, now) {
   const plan = await repo.getActivePlan();
-  return photoScenarioSnapshot(startedAt, now, surveyedBeaconPlacements(plan));
+  const placements = [
+    ...surveyedBeaconPlacements(plan),
+    ...(plan?.id === PHOTO_SCENARIO.planId ? PHOTO_SCENARIO.routeBeacons : []),
+  ];
+  return photoScenarioSnapshot(startedAt, now, placements);
 }
 
 /** 관제가 시나리오를 준비한다. 휴대폰이 안내 화면에 들어오기 전에는 0초에 멈춘다. */

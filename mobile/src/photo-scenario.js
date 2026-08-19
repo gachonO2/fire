@@ -36,6 +36,23 @@ const METERS_PER_UNIT = FIELD_CALIBRATION.walkedMeters / FIELD_CALIBRATION.planU
 const STEP_LENGTH = FIELD_CALIBRATION.stepLength;
 const TOTAL_METERS = polylineLength(ROUTE) * METERS_PER_UNIT;
 const DURATION_MS = 90_000;
+// 사용자가 요청한 경로용 가상 비콘 2개. 좌표를 따로 눈대중으로 찍지 않고
+// 파란 경로 길이의 34%, 72% 지점에 놓아 경로가 바뀌어도 선 위에 남게 한다.
+// 화면에서는 기존 답사 비콘과 같은 «숫자 원형 링»으로 그린다.
+const ROUTE_BEACONS = Object.freeze([
+  { id: 'SIM-ROUTE-01', nodeId: 'SIM_ROUTE_01', nodeName: '경로 가상 비콘 1', progress: 0.34 },
+  { id: 'SIM-ROUTE-02', nodeId: 'SIM_ROUTE_02', nodeName: '경로 가상 비콘 2', progress: 0.72 },
+].map(beacon => {
+  const point = pointOnRoute(ROUTE, beacon.progress);
+  return Object.freeze({
+    ...beacon,
+    x: point.x,
+    y: point.y,
+    count: 1,
+    txPower: -59,
+    virtual: true,
+  });
+}));
 const TOTAL_STEPS = ROUTE.slice(1).reduce((sum, point, i) => {
   const previous = ROUTE[i];
   const meters = Math.hypot(point[0] - previous[0], point[1] - previous[1]) * METERS_PER_UNIT;
@@ -57,6 +74,7 @@ export const PHOTO_SCENARIO = Object.freeze({
   totalMeters: Math.round(TOTAL_METERS * 10) / 10,
   totalSteps: TOTAL_STEPS,
   durationMs: DURATION_MS,
+  routeBeacons: ROUTE_BEACONS,
   calibration: FIELD_CALIBRATION,
   scaleNote: '현장 실측 63걸음 × 0.700m ÷ 405.743px',
 });

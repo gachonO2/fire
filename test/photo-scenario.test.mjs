@@ -16,9 +16,10 @@ const mappedBeacons = [
   { id: 'survey-spot:J_NS3', nodeId: 'J_NS3', x: 561.08, y: 315.92,
     count: 1, beaconIds: ['ble:existing-north'], txPower: -59, mapped: true },
 ];
-const start = photoScenarioSnapshot(startedAt, startedAt, mappedBeacons);
-const middle = photoScenarioSnapshot(startedAt, startedAt + 45_000, mappedBeacons);
-const end = photoScenarioSnapshot(startedAt, startedAt + 90_000, mappedBeacons);
+const allBeacons = [...mappedBeacons, ...PHOTO_SCENARIO.routeBeacons];
+const start = photoScenarioSnapshot(startedAt, startedAt, allBeacons);
+const middle = photoScenarioSnapshot(startedAt, startedAt + 45_000, allBeacons);
+const end = photoScenarioSnapshot(startedAt, startedAt + 90_000, allBeacons);
 
 expect('자동 대피 시간은 정확히 90초', PHOTO_SCENARIO.durationMs === 90_000);
 expect('현장 실측 63걸음·44.1m 축척 적용',
@@ -38,7 +39,7 @@ expect('90초에는 탈출구에 도착',
 expect('도착 좌표는 파란 경로 마지막 점',
   end.x === PHOTO_SCENARIO.route.at(-1)[0] && end.y === PHOTO_SCENARIO.route.at(-1)[1]);
 expect('90초가 지나도 출구 밖으로 나가지 않음',
-  photoScenarioSnapshot(startedAt, startedAt + 180_000, mappedBeacons).progress === 1);
+  photoScenarioSnapshot(startedAt, startedAt + 180_000, allBeacons).progress === 1);
 
 // 점 사이 시간이 아니라 **걸어야 할 길이**로 보간하는지 확인한다.
 const quarter = pointOnRoute([[0, 0], [10, 0], [10, 30]], 0.25);
@@ -61,12 +62,20 @@ const phoneEnd = follower.position();
 expect('90초 휴대폰도 같은 탈출구에서 멈춤',
   phoneEnd.x === end.x && phoneEnd.y === end.y);
 
-expect('시나리오 코드에 임의 비콘을 두지 않음', !('beacons' in PHOTO_SCENARIO));
-const startSignals = scenarioBeaconReadings(start, mappedBeacons);
-const atFirstBeacon = scenarioBeaconReadings(mappedBeacons[0], mappedBeacons);
-expect('서버 스냅샷은 기존 답사 위치만 사용',
-  start.beacons.length === mappedBeacons.length &&
-  start.beacons.every(b => b.mapped && b.nodeId && !b.id.startsWith('SIM-')));
+expect('파란 경로 위에 요청한 가상 비콘 두 개 배치',
+  PHOTO_SCENARIO.routeBeacons.length === 2 &&
+  PHOTO_SCENARIO.routeBeacons.every(b => b.virtual && b.id.startsWith('SIM-ROUTE-')));
+expect('가상 비콘 좌표는 경로 진행률 좌표와 정확히 일치',
+  PHOTO_SCENARIO.routeBeacons.every(b => {
+    const p = pointOnRoute(PHOTO_SCENARIO.route, b.progress);
+    return Math.abs(p.x - b.x) < 1e-9 && Math.abs(p.y - b.y) < 1e-9;
+  }));
+const startSignals = scenarioBeaconReadings(start, allBeacons);
+const atFirstBeacon = scenarioBeaconReadings(mappedBeacons[0], allBeacons);
+expect('서버 스냅샷은 기존 매핑과 경로 가상 두 개만 사용',
+  start.beacons.length === mappedBeacons.length + 2 &&
+  start.beacons.filter(b => b.mapped).length === mappedBeacons.length &&
+  start.beacons.filter(b => b.virtual).length === 2);
 expect('기존 위치의 신호원 수와 실제 ID를 보존',
   start.beacons[0].count === 1 && start.beacons[0].beaconIds[0] === 'ble:existing-alley');
 expect('기존 비콘 위치에 가까워지면 해당 RSSI가 강해짐',
