@@ -67,6 +67,32 @@ telemetryRoutes.put('/positions/:userId', async (req, res) => {
   res.json({ ok: true });
 });
 
+/**
+ * 위치를 지운다 — 관제에서 유령을 치운다.
+ *
+ *   DELETE /api/positions/:userId      한 사람
+ *   DELETE /api/positions?olderThan=60 60초 넘게 소식 없는 사람 전부
+ *   DELETE /api/positions              전부
+ *
+ * 앱은 새로 띄울 때마다 새 아이디를 만들었고 옛 아이디를 지울 길이 없었다.
+ * 그래서 한 명이 걷는데 화면에는 열다섯 명이 있었다 — 시연에서 «건물 안 인원»
+ * 이 그대로 틀린 숫자가 된다.
+ */
+telemetryRoutes.delete('/positions/:userId', async (req, res) => {
+  const repo = await getRepo();
+  const n = await repo.removePosition(req.params.userId);
+  res.json({ ok: true, removed: n });
+});
+
+telemetryRoutes.delete('/positions', async (req, res) => {
+  const sec = Number(req.query.olderThan);
+  const repo = await getRepo();
+  const n = await repo.removePosition(null, {
+    olderThanMs: Number.isFinite(sec) && sec > 0 ? sec * 1000 : null,
+  });
+  res.json({ ok: true, removed: n });
+});
+
 telemetryRoutes.get('/alerts', async (req, res) => {
   const repo = await getRepo();
   res.json(await repo.getAlerts());

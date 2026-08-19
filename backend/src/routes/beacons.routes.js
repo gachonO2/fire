@@ -22,6 +22,8 @@
  * 위치로 계속 비콘을 놓으면 한 자리에 전부 쌓인다.
  */
 import { Router } from 'express';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { remapSurvey } from '../../../shared/survey-remap.js';
 import { getRepo } from '../repositories/index.js';
 import { FloorPlan } from '../../../shared/floor-plan.js';
 import { BeaconMapper } from '../../../shared/beacon-map.js';
@@ -48,25 +50,31 @@ async function currentMapper() {
   if (!mapper || mapperPlanId !== plan.id) {
     mapper = new BeaconMapper(new FloorPlan(plan));
     mapperPlanId = plan.id;
+    locatorKeys = '';
   }
   return mapper;
 }
 
 /**
- * 맥을 BLE 수신기로 쓴다 — **폰이 못 읽으니 맥이 대신 듣는다.**
+ * 지금 도면에 맞춘 답사 매핑. **저장본은 건드리지 않는다.**
  *
- * Expo Go 는 BLE 스캔을 못 한다(네이티브 모듈이 필요하다). 그런데 측위를 확인하려면
- * 진짜 전파가 있어야 한다. 맥은 읽을 수 있으므로, **같은 사람이 둘 다 들고 다니면**
- * 맥이 귀 역할을 하고 폰이 눈과 다리 역할을 한다.
+ * 계산은 `shared/survey-remap.js` 가 한다 — 순수 함수라 시험으로 못 박을 수
+ * 있고(`test/survey-remap.test.mjs`), 앱에서도 같은 규칙을 쓸 수 있다.
  *
- * 서버가 하는 일은 둘이다.
- *
- *   1. 매핑 만들기   폰 위치 + 신호  →  "이 비콘은 저 지점에 있다"
- *   2. 지점 판정     매핑이 생긴 뒤   →  "지금 가장 센 비콘은 저 지점"  → 폰에 밀어준다
- *
- * 1 없이 2 를 할 수 없고, 2 를 하려면 1 이 먼저 쌓여야 한다. 그래서 **처음 한 바퀴는
- * 걸음으로만 돌고**(매핑을 만들고), 그 뒤부터 전파가 위치를 잡아 준다.
+ * 저장본을 직접 고치지 않는 이유: 처음에는 고치고 짝 없는 것을 버렸는데,
+ * 그러면 **다른 층을 잠깐 열어 보는 것만으로 답사가 지워진다.** 건물을 걸어서
+ * 만든 값을 화면 전환으로 잃으면 안 된다.
  */
+let surveyKey = null;
+function surveyFor(plan) {
+  const r = remapSurvey(plan, surveyed, spotXY);
+  if (r.remapped && surveyKey !== plan?.id) {
+    surveyKey = plan?.id;
+    console.log(`  답사 재연결: ${r.remapped}개를 «${plan?.name}» 의 새 지점으로 이음`
+      + (r.dropped ? ` · ${r.dropped}개는 짝 없음` : ''));
+  }
+  return r.mapping;
+}
 
 /**
  * 맥 스캐너가 올리는 관측.
@@ -88,19 +96,27 @@ beaconRoutes.post('/observations', async (req, res) => {
     .filter(p => !userId || p.userId === userId)
     .sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0));
 
-  if (fresh.length === 0) {
-    // 걷는 사람이 없으면 신호만 있고 위치가 없다. 버리되 왜 버렸는지는 알려준다.
-    return res.json({ ok: true, taken: 0, reason: '최근 폰 위치가 없습니다' });
-  }
-
-  const pos = fresh[0];
-  const taken = m.observe(pos, readings, pos.confidence ?? 1);
+  // 폰 위치는 **매핑을 만들 때만** 필요하다.
+  //
+  // 예전에는 여기서 바로 돌려보냈는데, 그러면 사람이 답사로 매핑을 다 만들어
+  // 놔도 폰이 안 걷는 한 판정이 영영 안 돈다. 답사의 목적이 바로 «폰 위치에
+  // 기대지 않는 것» 인데 그 경로가 폰 위치를 요구하고 있었던 셈이다.
+  //
+  //   매핑 만들기(자동 추정)  →  폰 위치가 필요하다
+  //   지점 판정              →  매핑만 있으면 된다
+  //
+  // 그래서 앞의 것만 건너뛰고 뒤는 계속 간다.
+  const pos = fresh[0] ?? null;
+  const taken = pos ? m.observe(pos, readings, pos.confidence ?? 1) : 0;
   const estimates = m.estimates();
   publish('beaconMap', estimates);
+  const plan0 = await (await getRepo()).getActivePlan();
 
   // 매핑이 쌓였으면 이제 **전파가 위치를 잡는다.** 걸음이 아니라 신호가 답한다.
   // 사람이 정한 것이 우선한다 — 걸음 추정보다 믿을 만하다
-  const mapping = { ...m.mapping(), ...surveyed };
+  // **지금 도면에 맞춘** 답사를 쓴다. 저장본을 그대로 쓰면 도면을 다시
+  // 판독한 뒤로 없는 지점을 가리켜 판정이 통째로 죽는다.
+  const mapping = { ...m.mapping(), ...surveyFor(plan0) };
   let fix = null;
   let est = null;
   const keys = Object.keys(mapping).sort().join('|');
@@ -170,7 +186,8 @@ beaconRoutes.post('/observations', async (req, res) => {
 
   res.json({
     ok: true, taken, fix,
-    at: { x: pos.x, y: pos.y, nodeId: pos.nodeId, confidence: pos.confidence },
+    reason: pos ? undefined : '최근 폰 위치가 없습니다 — 매핑은 안 쌓지만 판정은 돕니다',
+    at: pos ? { x: pos.x, y: pos.y, nodeId: pos.nodeId, confidence: pos.confidence } : null,
     beacons: estimates.length,
     ready: estimates.filter(e => e.ready).length,
     mapped: Object.keys(mapping).length,
@@ -221,6 +238,7 @@ beaconRoutes.get('/beacon-fix', (req, res) => {
     fix: lastFix && now - lastFix.at < 8000 ? lastFix : null,
     scanner: now - lastObservedAt < 8000,
     mapped: Object.keys({ ...(mapper ? mapper.mapping() : {}), ...surveyed }).length,
+    surveyed: Object.keys(surveyed).length,
   });
 });
 
@@ -238,20 +256,94 @@ beaconRoutes.get('/beacon-fix', (req, res) => {
  * 이 매핑은 걸음으로 만든 것보다 **우선한다**.
  */
 let surveyed = {};
+/** 지점 id → 그때의 좌표. 도면을 다시 읽어도 답사를 되살리는 열쇠다. */
+let spotXY = {};
 
-beaconRoutes.put('/beacon-map/mapping', (req, res) => {
+/**
+ * 답사 결과는 **파일에 남긴다.**
+ *
+ * 메모리에만 두면 서버를 한 번 재시작하는 순간 통째로 사라진다. 다른 값이면
+ * 다시 계산하면 그만이지만, 이것은 사람이 건물을 한 바퀴 걸어서 만든 값이다.
+ * 코드를 고치다 서버를 내리는 것만으로 그 걸음이 없어져서는 안 된다.
+ *
+ * 도면(`plans.json`)과는 다른 파일에 둔다 — 도면을 되돌리는 일과 답사를
+ * 되돌리는 일은 별개이고, 실제로 도면을 되돌리다 답사를 함께 날린 적이 있다.
+ */
+const SURVEY_FILE = new URL('../../data/beacon-survey.json', import.meta.url);
+
+function loadSurvey() {
+  try {
+    const raw = JSON.parse(readFileSync(SURVEY_FILE, 'utf8'));
+    // 예전 파일은 `{beaconId: nodeId}` 평면 구조였다 — 그대로 읽어 준다
+    surveyed = raw.surveyed ?? raw;
+    spotXY = raw.spotXY ?? {};
+    const spots = new Set(Object.values(surveyed)).size;
+    if (spots) console.log(`  답사 복원: 신호 ${Object.keys(surveyed).length}개 · ${spots}지점`);
+  } catch (_) { surveyed = {}; }
+}
+
+function saveSurvey() {
+  try {
+    mkdirSync(new URL('../../data/', import.meta.url), { recursive: true });
+    writeFileSync(SURVEY_FILE, JSON.stringify({ surveyed, spotXY }, null, 1));
+  } catch (e) {
+    console.warn('  답사 저장 실패:', e.message);
+  }
+}
+
+loadSurvey();
+
+beaconRoutes.put('/beacon-map/mapping', async (req, res) => {
   const { mapping, merge = true } = req.body || {};
   if (!mapping || typeof mapping !== 'object') {
     return res.status(400).json({ error: 'mapping 객체가 필요합니다.' });
   }
-  surveyed = merge ? { ...surveyed, ...mapping } : { ...mapping };
+
+  // 값은 **지점 id** 여야 한다. 화면의 버튼은 id 를 넣지만 직접 타이핑하면
+  // 이름("ACCEL LAB")이 들어오는데, 그러면 판정기가 도면에서 그 지점을 못 찾아
+  // 매핑이 조용히 죽는다 — 답사를 한 바퀴 다 돌고 나서야 알게 된다.
+  // 이름으로 들어온 것은 id 로 바꿔 주고, 도면에 없는 것은 되돌려 알린다.
+  const plan = await (await getRepo()).getActivePlan();
+  const ids = new Set((plan?.nodes || []).map(n => n.id));
+  const byName = new Map((plan?.nodes || []).map(n => [String(n.name).trim(), n.id]));
+  const clean = {};
+  const rejected = [];
+  for (const [beaconId, value] of Object.entries(mapping)) {
+    const v = String(value).trim();
+    if (ids.has(v)) clean[beaconId] = v;
+    else if (byName.has(v)) clean[beaconId] = byName.get(v);
+    else rejected.push(v);
+  }
+  if (rejected.length && !Object.keys(clean).length) {
+    return res.status(400).json({
+      error: `도면에 없는 지점입니다: ${[...new Set(rejected)].join(', ')}`,
+    });
+  }
+  surveyed = merge ? { ...surveyed, ...clean } : { ...clean };
+  // 지점의 **좌표**도 남긴다.
+  //
+  // 도면을 다시 판독하면 지점 id 가 새로 생긴다(`R_ACCEL` → `R_ACCELLAB`).
+  // id 만 들고 있으면 그 순간 답사가 통째로 무효가 되고, 건물을 다시 걸어야
+  // 한다. 좌표는 같은 사진에서 나오므로 거의 그대로다 — 그걸로 다시 잇는다.
+  for (const nodeId of new Set(Object.values(clean))) {
+    const n = (plan?.nodes || []).find(x => x.id === nodeId);
+    if (n) spotXY[nodeId] = [n.x, n.y];
+  }
+  saveSurvey();
   locatorKeys = '';                       // 다음 관측에서 판정기가 새 매핑을 받는다
   publish('beaconMap', mapper ? mapper.estimates() : []);
-  res.json({ ok: true, count: Object.keys(surveyed).length });
+  res.json({
+    ok: true,
+    count: Object.keys(surveyed).length,
+    spots: new Set(Object.values(surveyed)).size,
+    rejected: [...new Set(rejected)],
+  });
 });
 
 beaconRoutes.delete('/beacon-map/mapping', (req, res) => {
   surveyed = {};
+  spotXY = {};
+  saveSurvey();
   locatorKeys = '';
   res.json({ ok: true });
 });
@@ -259,8 +351,16 @@ beaconRoutes.delete('/beacon-map/mapping', (req, res) => {
 /** 지금까지 알아낸 비콘 위치 — 관제 지도가 이걸 그린다 */
 beaconRoutes.get('/beacon-map', async (req, res) => {
   const m = await currentMapper();
-  if (!m) return res.json({ estimates: [], mapping: {} });
-  res.json({ estimates: m.estimates(), mapping: m.mapping() });
+  // `surveyed` 는 사람이 태그한 것이라 도면이 없어도 유효하다. 조회에서 빼면
+  // 답사가 쌓이고 있는지 화면이 알 길이 없어 «해도 안 되는 것» 처럼 보인다.
+  if (!m) return res.json({ estimates: [], mapping: {}, surveyed });
+  const plan = await (await getRepo()).getActivePlan();
+  res.json({
+    estimates: m.estimates(),
+    mapping: m.mapping(),
+    surveyed: surveyFor(plan),        // 지금 도면에서 실제로 쓰이는 것
+    stored: Object.keys(surveyed).length,
+  });
 });
 
 /** 다시 시작 — 잘못 걸어서 엉킨 것을 버린다 */

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { Router } from 'express';
 import { validatePlan, FloorPlan, findUnreachableNodes } from '../../../shared/floor-plan.js';
 import { getRepo } from '../repositories/index.js';
@@ -261,6 +262,44 @@ async function nextSuffix(repo, base) {
   return used + 1;
 }
 
+/**
+ * 도면에서 뽑아낸 **벽**.
+ *
+ * `scripts/extract-walls.py` 가 사진에서 직선을 뽑아 만든 파일을 그대로 준다.
+ * 관제가 이걸 세워서 «기울인 종이» 를 «건물의 한 층» 으로 바꾼다.
+ *
+ * 없으면 404 가 아니라 **빈 목록**을 준다 — 벽은 있으면 좋은 것이지 없으면
+ * 화면이 못 뜨는 것이 아니다. 아직 안 뽑은 도면에서 관제가 죽으면 안 된다.
+ */
+planRoutes.get('/plans/:planId/walls', (req, res) => {
+  const id = String(req.params.planId).replace(/[^a-zA-Z0-9_-]/g, '');
+  try {
+    const url = new URL(`../../data/walls-${id}.json`, import.meta.url);
+    res.json(JSON.parse(readFileSync(url, 'utf8')));
+  } catch (_) {
+    res.json({ width: 0, height: 0, walls: [] });
+  }
+});
+
+/**
+ * 글씨·배경을 지운 **바닥 도면**.
+ *
+ * 원본에는 로고와 설명 문구가 큼직하게 박혀 있는데, 3D 로 세운 층 위에 로고가
+ * 누워 있으면 «건물» 이 아니라 «인쇄물 사진» 으로 보인다. 배경도 투명이라
+ * 층 슬래브 색이 그대로 바닥이 되고 벽과 색이 이어진다.
+ *
+ * 없으면 404 — 부르는 쪽이 원본 사진으로 물러설 수 있어야 한다.
+ */
+planRoutes.get('/plans/:planId/floor', (req, res) => {
+  const id = String(req.params.planId).replace(/[^a-zA-Z0-9_-]/g, '');
+  try {
+    const url = new URL(`../../data/floor-${id}.png`, import.meta.url);
+    res.type('png').send(readFileSync(url));
+  } catch (_) {
+    res.status(404).json({ error: '정리된 바닥 도면이 없습니다.' });
+  }
+});
+
 // ------------------------------------------------------------- 도면 이미지
 planRoutes.get('/plans/:planId/image', async (req, res) => {
   const repo = await getRepo();
@@ -294,6 +333,44 @@ planRoutes.put('/plans/:planId/scale', requireAdmin, async (req, res) => {
     scaleNote: req.body?.note || null,
   });
   res.json({ ok: true, metersPerUnit: v, widthM: (plan.image?.width || 0) * v });
+});
+
+/**
+ * 북쪽 보정만 고친다 — 앱이 걸으면서 알아낸 값을 올린다.
+ *
+ * 이 값이 없으면 나침반이 통째로 죽는다. 도면 안의 각도와 나침반 각도는 기준이
+ * 달라서, 이어 주는 값이 없으면 «폰을 이쪽으로 돌리세요» 도 «어느 갈래로 갔나» 도
+ * 못 한다.
+ *
+ * 앱이 매번 다시 알아낼 수도 있지만, 그러려면 **곧게 네 걸음**을 걸어야 한다.
+ * 화재 중에 그 네 걸음을 기다릴 수 없고, 무엇보다 한 번 잰 값이 건물마다 고정이다.
+ * 한 사람이 답사에서 재면 그 뒤 모든 사람이 그냥 쓴다.
+ */
+planRoutes.put('/plans/:planId/north', requireAdmin, async (req, res) => {
+  const raw = req.body?.northOffset;
+  // **null 은 «모른다» 로 되돌리는 뜻이다.** 반대로 걸으면 보정이 180° 틀어지는데,
+  // 틀린 값이 박힌 채로 굳는 것이 모르는 것보다 위험하다 — 모르면 앱이 절대 방향
+  // 안내를 접고 좌우 안내만 하지만, 틀린 값은 자신 있게 반대로 보낸다.
+  // 0 은 «도면 위쪽이 자북» 이라는 주장이므로 지우는 용도로 쓸 수 없다.
+  if (raw === null) {
+    const repo = await getRepo();
+    const plan = await repo.getPlan(req.params.planId);
+    if (!plan) return res.status(404).json({ error: '도면을 찾을 수 없습니다.' });
+    await repo.savePlan({ ...plan, northOffset: null, northNote: null });
+    return res.json({ ok: true, northOffset: null });
+  }
+
+  const v = Number(raw);
+  if (!Number.isFinite(v)) {
+    return res.status(400).json({ error: 'northOffset 은 각도(숫자)이거나 null 이어야 합니다.' });
+  }
+  const repo = await getRepo();
+  const plan = await repo.getPlan(req.params.planId);
+  if (!plan) return res.status(404).json({ error: '도면을 찾을 수 없습니다.' });
+
+  const deg = ((v % 360) + 360) % 360;
+  await repo.savePlan({ ...plan, northOffset: deg, northNote: req.body?.note || null });
+  res.json({ ok: true, northOffset: deg });
 });
 
 planRoutes.put('/plans/:planId/image', requireAdmin, async (req, res) => {

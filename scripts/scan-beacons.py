@@ -94,7 +94,8 @@ class Collector:
         self.rows = defaultdict(list)         # (지점, 비콘id) -> [rssi]
         self.meta = {}                        # 비콘id -> {kind, label, txPower}
         self.live = {}                        # 비콘id -> (rssi, 마지막 수신 시각)
-        self.seen = {}                        # 비콘id -> {first, last, n, rssis} (전체 이력)
+        self.seen = {}                        # 비콘id -> {first, last, n, rssis, buckets} (전체 이력)
+        self.t0 = time.time()                 # 체류율 계산의 기준 시각
 
     def on_adv(self, dev, adv):
         info = decode(dev, adv)
@@ -105,9 +106,11 @@ class Collector:
 
         s = self.seen.get(bid)
         if s is None:
-            self.seen[bid] = {"first": now, "last": now, "n": 1, "rssis": [adv.rssi]}
+            self.seen[bid] = {"first": now, "last": now, "n": 1, "rssis": [adv.rssi],
+                              "buckets": {int((now - self.t0) // PRESENCE_BUCKET_S)}}
         else:
             s["last"] = now
+            s["buckets"].add(int((now - self.t0) // PRESENCE_BUCKET_S))
             s["n"] += 1
             s["rssis"].append(adv.rssi)
 
@@ -167,6 +170,28 @@ BEACON_MIN_LIFE_S = 12 * 60   # 이보다 오래 같은 주소면 회전을 안 
 CARRIED_PRESENCE = 0.9        # 이 비율 이상 계속 보였고
 CARRIED_RSSI_SPAN = 25        # 신호 변동이 이보다 좁으면 함께 움직인 것으로 본다
 
+# 체류율은 **실제로 들린 시간**이어야 한다.
+#
+# 처음에는 `(마지막 − 처음) ÷ 전체시간` 으로 쟀는데, 그것은 간격이지 체류가 아니다.
+# 한 바퀴 돌아 제자리로 오면 벽에 붙은 기기는 **출발할 때 한 번, 돌아와서 한 번**
+# 들린다. 간격으로 재면 0.9 가 나와 "내가 들고 다닌 기기"로 버려진다 —
+# 찾으려던 바로 그 기기를 버리는 셈이었다.
+#
+# 그래서 30초 칸으로 나눠 **몇 칸에서 들렸나**를 센다. 두 번만 들린 기기는
+# 0.05 가 나오고, 가방 속 이어폰은 1.0 이 나온다. 이제 둘이 갈린다.
+PRESENCE_BUCKET_S = 30
+
+# 걸어서 한 바퀴 도는 탐색에서 **고정 설비의 가장 강한 증거는 재회다.**
+#
+# 벽에 붙은 기기는 지나갈 때 잠깐 들리고 사라졌다가, 한 바퀴 돌아 다시 그 앞을
+# 지나면 **같은 id 로** 또 들린다. 주소를 돌리는 폰은 그럴 수 없다 — 15분 뒤의
+# 그 폰은 다른 id 다. 그래서 「끊겼다 같은 id 로 다시 나타남 + 그 간격이 회전
+# 주기보다 김」이면 회전하지 않는 기기라는 뜻이 된다.
+#
+# 이건 SLAM 의 루프 클로저와 같은 논리인데, 여기서는 위치가 아니라 **id 의
+# 영속성**을 확인하는 데 쓴다.
+REVISIT_GAP_BUCKETS = 4       # 2분 이상 끊기면 한 번의 방문이 끝난 것으로 본다
+
 
 async def discover(minutes):
     """건물을 한 바퀴 돌며 무엇이 있는지 훑는다. 비콘이 있긴 한가부터 답한다."""
@@ -203,6 +228,18 @@ async def discover(minutes):
         os._exit(0)
 
 
+def _visit_clusters(buckets):
+    """칸 집합을 방문 횟수로 접는다. [0,1,2, 40,41] -> 2회"""
+    if not buckets:
+        return 0
+    ordered = sorted(buckets)
+    n = 1
+    for prev, cur in zip(ordered, ordered[1:]):
+        if cur - prev >= REVISIT_GAP_BUCKETS:
+            n += 1
+    return n
+
+
 def discover_report(c, elapsed):
     """오래 살아남은 항목이 비콘 후보다."""
     rows = []
@@ -212,13 +249,15 @@ def discover_report(c, elapsed):
         rows.append({
             "beaconId": bid, "kind": m["kind"], "label": m["label"],
             "lifeS": life, "n": s["n"],
+            "coverage": min(1.0, len(s["buckets"]) / max(1, round(elapsed / PRESENCE_BUCKET_S))),
+            "visits": _visit_clusters(s["buckets"]),
             "rssiMin": min(s["rssis"]), "rssiMax": max(s["rssis"]),
             "median": statistics.median(s["rssis"]),
         })
     rows.sort(key=lambda r: -r["lifeS"])
 
     for r in rows:
-        r["presence"] = min(1.0, r["lifeS"] / elapsed) if elapsed > 0 else 0
+        r["presence"] = r["coverage"]
         r["span"] = r["rssiMax"] - r["rssiMin"]
         r["carried"] = (r["presence"] >= CARRIED_PRESENCE
                         and r["span"] <= CARRIED_RSSI_SPAN)
@@ -228,6 +267,12 @@ def discover_report(c, elapsed):
     lasting = [r for r in rows
                if r["lifeS"] >= BEACON_MIN_LIFE_S and not r["carried"]
                and r not in formatted]
+
+    # 끊겼다 같은 id 로 다시 만난 기기 — 걸어서 도는 탐색의 핵심 증거
+    revisited = [r for r in rows
+                 if r["visits"] >= 2 and r["lifeS"] >= BEACON_MIN_LIFE_S
+                 and r["coverage"] < 0.6 and r not in formatted]
+    revisited.sort(key=lambda r: (-r["visits"], -r["lifeS"]))
 
     print("\n" + "=" * 66)
     print(f"탐색 결과 — {elapsed/60:.1f}분, 기기 {len(rows)}개")
@@ -258,6 +303,15 @@ def discover_report(c, elapsed):
             print(f"   {r['median']:>6.1f} dBm  {r['label'][:30]:<32}"
                   f" 신호폭 {r['span']:>3} dB")
 
+    if revisited:
+        print(f"\n· 다시 만난 기기 ({len(revisited)}개) — 주소를 안 바꾸는 고정 설비입니다")
+        print("  지나갈 때 들리고 사라졌다가, 돌아오니 **같은 id 로** 또 들렸습니다.")
+        print("  회전하는 폰은 이럴 수 없습니다. 이게 곧 쓸 수 있는 앵커입니다.")
+        for r in revisited[:15]:
+            print(f"  {r['label'][:30]:32s} {r['visits']}회 방문  "
+                  f"간격 {r['lifeS']/60:.0f}분  체류 {r['coverage']*100:.0f}%  "
+                  f"신호 {r['rssiMin']}~{r['rssiMax']}")
+
     only_lasting = lasting
     if only_lasting:
         print(f"\n· 오래 붙어 있던 기기 ({len(only_lasting)}개) — 고정 설치일 수 있습니다")
@@ -266,7 +320,8 @@ def discover_report(c, elapsed):
             print(f"   {r['median']:>6.1f} dBm  {r['label'][:34]:<34}"
                   f"   {r['lifeS']:.0f}초  신호 {r['rssiMin']}~{r['rssiMax']}")
 
-    passing = len(rows) - len(cands)
+    keepers = {id(r) for r in formatted} | {id(r) for r in lasting} | {id(r) for r in revisited}
+    passing = len(rows) - len(keepers)
     print(f"\n· 스쳐 지나간 기기 {passing}개 — 사람들의 폰·워치·이어폰입니다.")
     print("  요즘 기기는 주소를 주기적으로 바꿔서 짧은 항목 여럿으로 나타납니다.")
 
@@ -507,6 +562,33 @@ li.star .bar i{background:var(--ok)}
 border-radius:5px;background:rgba(34,197,94,.18);color:var(--ok);margin-right:5px}
 .badge.gen{background:rgba(255,255,255,.08);color:var(--dim)}
 .empty{color:var(--dim);font-size:14px;text-align:center;padding:30px 0}
+
+/* 도면에서 찍어 기록한다.
+   이름 목록에서 고르는 방식은 현장에서 성립하지 않았다 — 지금 서 있는 자리가
+   43개 이름 중 어느 것인지 아는 사람이 없다. 그림에서 짚는 것이 유일하게
+   현실적이다. 사진은 검은 바탕에 흰 선이라 명도를 뒤집어 흰 종이로 쓴다. */
+.mapbox{overflow:auto;-webkit-overflow-scrolling:touch;border-radius:12px;
+margin:10px 0;background:#fff}
+.map{position:relative;width:calc(100% * var(--mz,2));touch-action:manipulation}
+.map img{display:block;width:100%;filter:invert(1) hue-rotate(180deg)}
+.map svg{position:absolute;inset:0;width:100%;height:100%}
+.zoomrow{display:flex;gap:8px;align-items:center;justify-content:center;margin-top:-4px}
+.zoomrow button{width:38px;height:32px;border-radius:9px;border:1px solid var(--line);
+background:var(--card);color:var(--tx);font-size:16px}
+.zoomrow span{color:var(--dim);font-size:12px;min-width:74px;text-align:center}
+/* 보이는 점과 **누르는 영역**을 나눈다.
+   한 규칙으로 묶으면 CSS 의 fill 이 속성 fill="transparent" 를 이겨서
+   손가락 크기로 키운 터치 영역까지 통째로 칠해진다 — 도면이 점으로 덮인다. */
+.map circle.dot{fill:#94a3b8;stroke:#fff;stroke-width:2.5}
+.map circle.dot.exit{fill:#22c55e}
+.map circle.dot.done{fill:#2563eb}
+.map circle.dot.sel{fill:#f59e0b;stroke:#111;stroke-width:3}
+.map circle.hit{fill:transparent;stroke:none}
+.pick{display:flex;gap:8px;align-items:center;background:var(--card);
+border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.pick b{flex:1;font-size:15px}
+.pick span{color:var(--dim);font-size:12.5px}
+.hintbar{color:var(--dim);font-size:12.5px;text-align:center;margin:4px 0 8px}
 </style>
 <div class=wrap>
 <h1>비콘 탐색</h1>
@@ -516,11 +598,17 @@ border-radius:5px;background:rgba(34,197,94,.18);color:var(--ok);margin-right:5p
   <div class=stat><b id=nfix>0</b><span>고정 기기</span></div>
   <div class=stat><b id=nall>0</b><span>전체</span></div>
 </div>
+<div class=hintbar id=hint>도면에서 지금 서 있는 자리를 누르세요</div>
+<div class=mapbox id=mapbox><div class=map id=map><img id=mapimg alt=""><svg id=dots
+  viewBox="0 0 100 100" preserveAspectRatio=none></svg></div></div>
+<div class=zoomrow><button id=zout>−</button><span id=zlbl>2배</span><button id=zin>+</button></div>
+<div class=pick id=pick hidden><b id=pickname>—</b><span id=pickhint>여기서 5초</span></div>
 <div class=tagbar>
-  <input id=tag placeholder="지점 id (아래에서 고르세요)" autocapitalize=off>
+  <input id=tag placeholder="도면에서 고르거나 지점 id 입력" autocapitalize=off>
   <button id=go>5초 기록</button>
 </div>
-<div id=nodes class=nodes></div>
+<details><summary style="color:#9ca3af;font-size:13px;margin:6px 0">이름으로 고르기</summary>
+<div id=nodes class=nodes></div></details>
 <div class=rec id=rec hidden></div>
 <ul id=list></ul>
 <div class=empty id=empty>스캔 중…</div>
@@ -531,7 +619,8 @@ async function poll(){
   try{
     const r=await fetch('/api/state');const d=await r.json();
     $('sub').textContent=`경과 ${Math.floor(d.elapsed/60)}분 ${Math.floor(d.elapsed%60)}초`
-      +(d.tag?` · 「${d.tag}」 기록 중`:'');
+      +(d.tag?` · 「${d.tag}」 기록 중`:'')
+      +(d.surveyed!=null?` · 답사 ${d.surveyed}지점`:'');
     $('nstar').textContent=d.nstar;$('nfix').textContent=d.nfix;$('nall').textContent=d.nall;
     $('rec').hidden=!d.tag; if(d.tag)$('rec').textContent=`「${d.tag}」 기록 중…`;
     const L=$('list');L.innerHTML='';
@@ -559,22 +648,86 @@ $('go').onclick=async()=>{
     done.add(n);
     document.querySelectorAll('#nodes button').forEach(b=>{
       if(done.has(b.dataset.id))b.classList.add('done');});
+    paint();
+    $('pickhint').textContent='기록됨 ✓';
   },5200);
 };
 // 도면 지점을 버튼으로 — 손으로 치면 오타 하나에 매핑이 엉킨다
 const done=new Set();
+let NODES=[], SEL=null;
+
+function paint(){
+  const svg=$('dots'); if(!svg) return;
+  svg.innerHTML=NODES.map(n=>{
+    const cls=[n.id===SEL?'sel':'', done.has(n.id)?'done':'',
+               n.type==='exit'?'exit':''].filter(Boolean).join(' ');
+    // 손가락으로 누를 수 있어야 한다 — 눈으로 보이는 점보다 누르는 영역을 크게.
+    return `<circle class="dot ${cls}" cx="${n.x}" cy="${n.y}" r="${n.id===SEL?R*1.5:R}"/>`
+         + `<circle class="hit" cx="${n.x}" cy="${n.y}" r="${R*3.2}" data-id="${n.id}"/>`;
+  }).join('');
+  [...svg.querySelectorAll('[data-id]')].forEach(c=>{
+    c.onclick=()=>select(c.dataset.id);
+  });
+}
+
+function select(id){
+  SEL=id; const n=NODES.find(x=>x.id===id);
+  $('tag').value=id;
+  $('pick').hidden=!n;
+  if(n){
+    $('pickname').textContent=n.name||n.id;
+    $('pickhint').textContent=done.has(id)?'이미 기록됨 — 다시 하면 덮어씁니다':'그 자리에 서서 5초';
+  }
+  paint();
+  document.querySelectorAll('#nodes button').forEach(b=>
+    b.classList.toggle('on', b.dataset.id===id));
+}
+
+let R=6;
 (async()=>{
   try{
-    const r=await fetch('/api/nodes');const ns=await r.json();
+    const r=await fetch('/api/nodes');const d=await r.json();
+    NODES=(d.nodes||[]).filter(n=>Number.isFinite(n.x));
+    const img=d.image;
+    if(img&&img.width){
+      $('dots').setAttribute('viewBox',`0 0 ${img.width} ${img.height}`);
+      // 점 크기를 도면 크기에 맞춘다 — 픽셀 좌표계라 도면마다 값이 크게 다르다
+      R=Math.max(img.width,img.height)/150;
+    }
     const box=$('nodes');
-    for(const n of ns){
+    for(const n of NODES){
       const b=document.createElement('button');
       b.textContent=n.name||n.id; b.dataset.id=n.id;
-      b.onclick=()=>{$('tag').value=n.id;};
+      b.onclick=()=>select(n.id);
       box.appendChild(b);
     }
-  }catch(e){}
+    // 이미 기록한 지점은 새로고침해도 초록이어야 한다 — 어디까지 했는지가
+    // 답사 중에 제일 자주 확인하는 정보다.
+    try{
+      const sv=await (await fetch('/api/surveyed')).json();
+      (sv||[]).forEach(id=>done.add(id));
+    }catch(e){}
+    paint();
+    // 처음에는 도면 가운데가 보이게 — 왼쪽 끝 로고부터 보이면 길을 잃는다
+    setTimeout(()=>{ const b=$('mapbox'); b.scrollLeft=(b.scrollWidth-b.clientWidth)/2; },80);
+    const pi=await (await fetch('/api/plan-image')).json();
+    if(pi&&pi.dataUri){ $('mapimg').src=pi.dataUri; }
+    else { $('map').style.display='none';
+           $('hint').textContent='도면 사진이 없습니다 — 아래에서 이름으로 고르세요'; }
+  }catch(e){ $('hint').textContent='도면을 못 불러왔습니다 — 이름으로 고르세요'; }
 })();
+let MZ=2;
+function setZoom(v){
+  const b=$('mapbox');
+  const mid=(b.scrollLeft+b.clientWidth/2)/Math.max(1,b.scrollWidth);   // 보던 지점을 유지
+  MZ=Math.max(1,Math.min(6,v));
+  $('map').style.setProperty('--mz',MZ);
+  $('zlbl').textContent=MZ+'배';
+  setTimeout(()=>{ b.scrollLeft=mid*b.scrollWidth-b.clientWidth/2; },30);
+}
+$('zin').onclick=()=>setZoom(MZ+1);
+$('zout').onclick=()=>setZoom(MZ-1);
+
 poll();setInterval(poll,700);
 </script>"""
 
@@ -585,6 +738,28 @@ SURVEY_MIN_RSSI = -80
 SURVEY_TOP_N = 8
 
 _server_url = None
+
+
+_plan_image = None
+_surveyed_cache = {"n": None, "at": 0.0}
+
+
+def _surveyed_spots():
+    """서버에 등록된 답사 지점 수. 0.7초마다 폴링되므로 짧게 캐시한다."""
+    if not _server_url:
+        return None
+    now = time.time()
+    if now - _surveyed_cache["at"] < 2.0:
+        return _surveyed_cache["n"]
+    try:
+        with urllib.request.urlopen(
+                _server_url.rstrip("/") + "/api/beacon-map", timeout=3) as r:
+            sv = json.loads(r.read()).get("surveyed") or {}
+        _surveyed_cache["n"] = len(set(sv.values()))
+    except Exception:
+        _surveyed_cache["n"] = None
+    _surveyed_cache["at"] = now
+    return _surveyed_cache["n"]
 
 
 def push_survey(collector, spot):
@@ -630,19 +805,63 @@ def make_handler(collector, t0):
 
         def do_GET(self):
             if self.path.startswith("/api/nodes"):
-                out = []
+                # 좌표와 도면 크기를 함께 준다 — 폰이 **도면 위에서 찍어** 기록하려면
+                # 지점 이름만으로는 안 된다. 현장에서 «SOUTH STREET 교차점 1
+                # (ELEWAY 하단)» 이 어디인지 아는 사람은 없다. 그림에서 짚는 것이
+                # 유일하게 현실적인 방법이다.
+                out = {"nodes": [], "image": None}
                 if _server_url:
                     try:
                         with urllib.request.urlopen(
                                 _server_url.rstrip("/") + "/api/map", timeout=4) as r:
-                            out = [{"id": n["id"], "name": n.get("name") or n["id"]}
-                                   for n in json.loads(r.read()).get("nodes", [])]
+                            plan = json.loads(r.read())
+                        out["nodes"] = [
+                            {"id": n["id"], "name": n.get("name") or n["id"],
+                             "x": n.get("x"), "y": n.get("y"), "type": n.get("type")}
+                            for n in plan.get("nodes", [])]
+                        out["image"] = plan.get("image")
+                        out["planId"] = plan.get("id")
                     except Exception:
-                        out = []
+                        pass
                 return self._send(200, json.dumps(out, ensure_ascii=False),
                                   "application/json")
+
+            if self.path.startswith("/api/plan-image"):
+                # 사진은 크다(수백 KB). 한 번 받아 두고 계속 쓴다.
+                global _plan_image
+                if _plan_image is None and _server_url:
+                    try:
+                        with urllib.request.urlopen(
+                                _server_url.rstrip("/") + "/api/map", timeout=4) as r:
+                            pid = json.loads(r.read()).get("id")
+                        with urllib.request.urlopen(
+                                _server_url.rstrip("/") + f"/api/plans/{pid}/image",
+                                timeout=15) as r:
+                            _plan_image = json.loads(r.read()).get("dataUri") or ""
+                    except Exception:
+                        _plan_image = ""
+                return self._send(200, json.dumps({"dataUri": _plan_image or ""}),
+                                  "application/json")
+
+            if self.path.startswith("/api/surveyed"):
+                # 이미 기록한 지점 — 새로고침해도 초록이 유지돼야 한다
+                done = []
+                if _server_url:
+                    try:
+                        with urllib.request.urlopen(
+                                _server_url.rstrip("/") + "/api/beacon-map", timeout=4) as r:
+                            done = sorted(set((json.loads(r.read()).get("surveyed") or {}).values()))
+                    except Exception:
+                        pass
+                return self._send(200, json.dumps(done, ensure_ascii=False),
+                                  "application/json")
             if self.path.startswith("/api/state"):
-                self._send(200, json.dumps(state(collector, t0)), "application/json")
+                st = state(collector, t0)
+                # 진척은 **서버에 남은 것**을 센다. 스캐너 안의 기록을 세면
+                # 올리기가 실패해도 숫자가 올라가서, 한 바퀴 다 돌고 나서야
+                # 아무것도 안 쌓였다는 걸 알게 된다.
+                st["surveyed"] = _surveyed_spots()
+                self._send(200, json.dumps(st), "application/json")
             else:
                 self._send(200, PAGE, "text/html; charset=utf-8")
 

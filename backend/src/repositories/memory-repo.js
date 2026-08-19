@@ -211,6 +211,27 @@ export class MemoryRepo {
     publish('positions', await this.getPositions());
   }
 
+  /**
+   * 위치를 지운다. userId 를 주면 그 사람만, 안 주면 **오래된 것 전부**.
+   *
+   * 지우는 길이 없어서 관제에 유령이 쌓였다. 앱을 새로 띄울 때마다 새 아이디가
+   * 생기는데 옛 아이디는 그대로 남아, 실제로 한 명이 걷고 있는데 화면에는
+   * 열다섯 명이 있었다. 시연에서 «건물 안 인원» 이 그대로 틀린 숫자가 된다.
+   */
+  async removePosition(userId = null, { olderThanMs = null } = {}) {
+    let n = 0;
+    if (userId) {
+      n = this.positions.delete(userId) ? 1 : 0;
+    } else {
+      const cut = olderThanMs === null ? null : Date.now() - olderThanMs;
+      for (const [id, p] of [...this.positions]) {
+        if (cut === null || (p.ts ?? 0) < cut) { this.positions.delete(id); n++; }
+      }
+    }
+    if (n) publish('positions', await this.getPositions());
+    return n;
+  }
+
   // ---------------------------------------------------------------- metrics
   async getMetrics() {
     return [...this.metrics];

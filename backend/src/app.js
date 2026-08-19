@@ -9,6 +9,7 @@ import { telemetryRoutes } from './routes/telemetry.routes.js';
 import { guardianRoutes } from './routes/guardians.routes.js';
 import { planRoutes } from './routes/plans.routes.js';
 import { sensorRoutes } from './routes/sensors.routes.js';
+import { magneticRoutes } from './routes/magnetic.routes.js';
 import { beaconRoutes } from './routes/beacons.routes.js';
 import { streamRoutes } from './routes/stream.routes.js';
 
@@ -33,6 +34,7 @@ export function createApp() {
   app.use('/api', guardianRoutes);
   app.use('/api', planRoutes);
   app.use('/api', beaconRoutes);
+  app.use('/api', magneticRoutes);
   app.use('/api', sensorRoutes);
   app.use('/api', streamRoutes);
 

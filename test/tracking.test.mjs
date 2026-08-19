@@ -273,5 +273,64 @@ const SAFEHOLD_RUN = 5;   // 이만큼 연속으로 낮으면 진짜로 모르�
 }
 
 
+// ── 원격 판정만으로 지점을 옮긴다 (실시간 위치 화면) ────────────────────────
+//
+// 맥이 듣고 서버가 판정한 값만 들어오는 화면이다. 걸음이 없으므로 판단 계층의
+// 거리 검사에 쓸 근거가 없는데, 예산은 «걸어온 걸음» 으로 자라기 때문에 0 걸음이면
+// 6 걸음에 묶인다. 지점 사이가 그보다 멀면 **모든 이동이 순간이동으로 분류돼**
+// 앵커가 0.35 배로 깎이고, 같은 지점이 반복되면 «확인» 으로 삼켜져 두 번째 기회도
+// 오지 않는다. 그래서 전파가 옳은 답을 계속 보내는데도 점이 붙박였다.
+{
+  const far = plan.stepsBetween?.('R301', 'HW2') ?? null;
+  const t = new Tracking(plan, { startNodeId: 'R301' });
+
+  // 전파만 믿는 화면 — 서버가 말하는 곳으로 그대로 간다
+  let moved = null;
+  for (let i = 1; i <= 4 && !moved; i++) {
+    t.pushRemoteFix('HW2', { holdCount: 1, trusted: true });
+    if (t.position()?.nodeId === 'HW2') moved = i;
+  }
+  expect('전파만 있을 때 원격 판정을 따라간다', moved !== null && moved <= 2,
+    moved ? `${moved}번째 판정에서 이동${far ? ` (${far}걸음 거리)` : ''}` : '끝내 안 옮겨감');
+}
+
+{
+  // 안내 화면 쪽 — 거리 검사는 살리되, 같은 판정이 계속 오면 결국 옮겨가야 한다.
+  // 판단 계층의 «멀면 후보로만 넣고 다음 스캔에 또 오면 이긴다» 는 설계가
+  // 실제로 성립하는지 보는 시험이다.
+  const t = new Tracking(plan, { startNodeId: 'R301' });
+  let moved = null;
+  for (let i = 1; i <= 12 && !moved; i++) {
+    t.pushRemoteFix('HW2');
+    if (t.position()?.nodeId === 'HW2') moved = i;
+  }
+  expect('반복되는 원격 판정은 결국 이긴다', moved !== null,
+    moved ? `${moved}번째 판정에서 이동` : '12번을 보내도 안 옮겨감');
+}
+
+// ── 걸어서 알아낸 북쪽 보정이 판단 계층까지 닿는가 ──────────────────────────
+//
+// 도면에 보정값이 없으면 나침반은 **아무 일도 하지 않는다**(기준이 달라 비교하면
+// 전부 틀린 값으로 깎게 된다). 안내 화면은 걸으며 그 값을 알아내는데, 예전에는
+// 경로 안내기에만 넣어서 판단 계층은 끝까지 모르는 채였다 — 방위를 재고 있으면서
+// 아무 데도 쓰지 않았다.
+{
+  const blind = new FloorPlan({ ...RAW, northOffset: null });
+  expect('보정 전에는 절대 방위를 모른다', blind.trueBearing('R301', 'HW1') === null);
+
+  blind.setNorthOffset(0);
+  const got = blind.trueBearing('R301', 'HW1');
+  expect('보정을 넣으면 절대 방위가 나온다', Number.isFinite(got), `${got?.toFixed(0)}°`);
+
+  // 판단 계층이 실제로 그 값을 쓰는가 — 반대 방향으로 걷는다고 하면 감점돼야 한다
+  const t = new Tracking({ ...RAW, northOffset: null }, { startNodeId: 'HW1' });
+  t.step({});
+  const before = t.confidence();
+  t.setNorthOffset(0);
+  for (let i = 0; i < 8; i++) t.step({ heading: (got + 180) % 360 });
+  expect('보정 뒤에는 나침반이 후보를 깎는다', t.confidence() < before,
+    `${(before * 100).toFixed(0)}% → ${(t.confidence() * 100).toFixed(0)}%`);
+}
+
 console.log(failed === 0 ? '\n추적 계층 통과' : `\n실패 ${failed}건`);
 process.exit(failed === 0 ? 0 : 1);

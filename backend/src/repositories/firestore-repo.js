@@ -213,6 +213,22 @@ export class FirestoreRepo {
     await this.db.collection('positions').doc(userId).set({ ...payload, ts: Date.now() });
   }
 
+  /** 위치를 지운다 — 메모리 저장소와 같은 규칙 (`memory-repo.js` 참고) */
+  async removePosition(userId = null, { olderThanMs = null } = {}) {
+    if (userId) {
+      await this.db.collection('positions').doc(userId).delete();
+      return 1;
+    }
+    const snap = await this.db.collection('positions').get();
+    const cut = olderThanMs === null ? null : Date.now() - olderThanMs;
+    let n = 0;
+    for (const doc of snap.docs) {
+      const ts = doc.data()?.ts ?? 0;
+      if (cut === null || ts < cut) { await doc.ref.delete(); n++; }
+    }
+    return n;
+  }
+
   // ---------------------------------------------------------------- metrics
   async getMetrics() {
     const snap = await this.db.collection('metrics').orderBy('ts', 'desc').limit(50).get();
