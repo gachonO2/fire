@@ -85,6 +85,14 @@ export class Api {
   /** 서버가 아는 대피자 위치 — 비콘 게이트웨이나 관제가 올린 값 */
   getPositions() { return this._fetch('/api/positions'); }
 
+  /** 관제가 준비한 사진 시나리오를 휴대폰 진입 시점부터 90초로 시작한다. */
+  startPhotoScenarioTimeline() {
+    return this._fetch('/api/demo/photo-scenario/start', { method: 'POST' });
+  }
+
+  /** 서버 시각으로 계산된 공용 좌표. 관제와 휴대폰 모두 이 값만 쓴다. */
+  getPhotoScenarioTimeline() { return this._fetch('/api/demo/photo-scenario'); }
+
   /**
    * 내 위치 보고 — 관제 지도에 실시간으로 뜨게 한다.
    *

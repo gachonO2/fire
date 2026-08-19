@@ -120,6 +120,7 @@ export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
   const [arrived, setArrived] = useState(false);
   const [stopped, setStopped] = useState(false);
   const [info, setInfo] = useState(null);
+  const [scenarioPosition, setScenarioPosition] = useState(null);
 
   const sensor = useRef(new BearingSensor()).current;
   const haptic = useRef(new HapticCompass()).current;
@@ -165,6 +166,7 @@ export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
   const lastSpoken = useRef('');
   const calib = useRef(new NorthCalibrator()).current;
   const lastWrongNag = useRef(0);
+  const scenarioFinished = useRef(false);
 
   const place = plan?.name?.trim() || FALLBACK_PLACE;
 
@@ -298,6 +300,54 @@ export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
       stopSpeaking();
     };
   }, []);
+
+  // 사진 시나리오는 **서버 시계가 위치 센서**다. 휴대폰과 관제가 각자 90초
+  // 애니메이션을 돌리면 프레임·절전·네트워크 차이만큼 반드시 어긋난다. 서버가
+  // 계산한 같은 좌표를 0.25초마다 받아 지도·거리·방향 안내기를 함께 이동한다.
+  useEffect(() => {
+    if (!scenario) return undefined;
+    let alive = true;
+    let busy = false;
+
+    const applySnapshot = snapshot => {
+      if (!alive || !snapshot || !Number.isFinite(snapshot.progress)) return;
+      const f = followerRef.current;
+      f.seekProgress(snapshot.progress);
+      const d = f.describe();
+      setScenarioPosition({ x: snapshot.x, y: snapshot.y, progress: snapshot.progress });
+      setInfo({
+        ...d,
+        stepsLeft: snapshot.stepsLeft,
+        metersLeft: Math.min(d.metersLeft, snapshot.remainingMeters),
+        totalMetersLeft: snapshot.remainingMeters,
+      });
+
+      if (snapshot.phase === 'arrived' && !scenarioFinished.current) {
+        scenarioFinished.current = true;
+        finish();
+      }
+    };
+
+    const sync = async start => {
+      if (busy || !alive) return;
+      busy = true;
+      try {
+        const snapshot = start
+          ? await api?.startPhotoScenarioTimeline?.()
+          : await api?.getPhotoScenarioTimeline?.();
+        applySnapshot(snapshot);
+      } finally {
+        busy = false;
+      }
+    };
+
+    sync(true);
+    const timer = setInterval(() => sync(false), 250);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [scenario]);
 
   /** 마지막으로 한 말을 기억해 둔다 — 화면을 누르면 다시 들려준다 */
   function speak(text) {
@@ -434,6 +484,9 @@ export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
    * 실패는 무시한다. 위치 보고가 안 된다고 안내를 멈추면 본말이 전도된다.
    */
   function report(phase) {
+    // 자동 시나리오에서 앱 고유 userId로 위치를 다시 쓰면 관제에 두 번째 사람이
+    // 생긴다. 공용 시나리오 위치는 서버 타임라인 하나만 쓴다.
+    if (scenario) return;
     const f = followerRef.current;
     if (!f) return;
     const pos = f.position();
@@ -464,6 +517,8 @@ export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
   // ---------------------------------------------------- 한 걸음
   function onStep() {
     if (arrived) return;
+    // 사진 시나리오는 실제 걸음 수와 관계없이 정확히 90초에 도착한다.
+    if (scenario) return;
 
     // **안전상태에서도 걸음은 센다.**
     //
@@ -723,7 +778,7 @@ export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
             walls={walls}
             routePoints={followerRef.current?.path}
             scenario={scenario}
-            scenarioPosition={scenario ? followerRef.current?.position() : null}
+            scenarioPosition={scenario ? (scenarioPosition || followerRef.current?.position()) : null}
             realBeacons={realBeacons.current}
             mapped={mapped}
           />

@@ -105,6 +105,21 @@ await api('/api/positions/u1', { method: 'PUT', body: JSON.stringify({ nodeId: '
 const pos = await api('/api/positions');
 expect('PUT/GET /api/positions', pos.body.some(p => p.userId === 'u1'));
 
+// 관제는 0초에 준비하고, 휴대폰이 안내 화면에 들어올 때 서버 시계 하나를 시작한다.
+const armedPhoto = await api('/api/demo/photo-scenario/arm', { method: 'POST' });
+expect('사진 시나리오 준비는 시작점에 정지',
+  armedPhoto.body.timelineState === 'armed' && armedPhoto.body.progress === 0);
+const startedPhoto = await api('/api/demo/photo-scenario/start', { method: 'POST' });
+expect('휴대폰 진입 시 90초 공용 타임라인 시작',
+  startedPhoto.body.timelineState === 'running' &&
+  startedPhoto.body.scenarioDurationMs === 90_000 &&
+  Number.isFinite(startedPhoto.body.scenarioStartedAt));
+const livePhoto = await api('/api/demo/photo-scenario');
+expect('서버가 관제·휴대폰 공용 좌표를 반환',
+  livePhoto.body.userId === 'scenario-cocone-photo' &&
+  Number.isFinite(livePhoto.body.serverNow) && Number.isFinite(livePhoto.body.x));
+await api('/api/positions/scenario-cocone-photo', { method: 'DELETE' });
+
 // 15) 경로 요청마다 KPI가 자동 기록됨
 const metrics = await api('/api/metrics');
 // 성공한 경로 요청 3건(r1, r2, r3)이 기록되고, 400으로 거부된 요청은 기록되지 않는다

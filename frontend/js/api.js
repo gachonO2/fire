@@ -330,6 +330,18 @@ export class Api {
     return this._fetch('/api/positions', { method: 'DELETE' });
   }
 
+  armPhotoScenario() {
+    return this._fetch('/api/demo/photo-scenario/arm', { method: 'POST' });
+  }
+
+  startPhotoScenarioTimeline() {
+    return this._fetch('/api/demo/photo-scenario/start', { method: 'POST' });
+  }
+
+  getPhotoScenarioTimeline() {
+    return this._fetch('/api/demo/photo-scenario');
+  }
+
   /** 네이티브 앱의 가상 비콘 출발점을 시나리오 위치에 맞춘다. */
   setDemoStand(nodeId) {
     return this._fetch('/api/demo/stand', {

@@ -25,6 +25,7 @@ export function polylineLength(points = []) {
 const METERS_PER_UNIT = 50 / 1352;
 const STEP_LENGTH = 0.7;
 const TOTAL_METERS = polylineLength(ROUTE) * METERS_PER_UNIT;
+const DURATION_MS = 90_000;
 const TOTAL_STEPS = ROUTE.slice(1).reduce((sum, point, i) => {
   const previous = ROUTE[i];
   const meters = Math.hypot(point[0] - previous[0], point[1] - previous[1]) * METERS_PER_UNIT;
@@ -45,8 +46,60 @@ export const PHOTO_SCENARIO = Object.freeze({
   stepLength: STEP_LENGTH,
   totalMeters: Math.round(TOTAL_METERS * 10) / 10,
   totalSteps: TOTAL_STEPS,
+  durationMs: DURATION_MS,
   scaleNote: '도면 전체 폭 50m 추정 — 현장 실측 후 교체',
 });
+
+/** 경로 길이를 기준으로 진행률 위치를 찾는다. 점 개수가 달라도 속도가 일정하다. */
+export function pointOnRoute(points = ROUTE, progress = 0) {
+  const p = Math.max(0, Math.min(1, Number(progress) || 0));
+  if (!points.length) return { x: 0, y: 0, segment: 0, segmentProgress: 0 };
+  if (points.length === 1 || p === 0) {
+    return { x: points[0][0], y: points[0][1], segment: 0, segmentProgress: 0 };
+  }
+
+  const lengths = [];
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    const length = Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
+    lengths.push(length);
+    total += length;
+  }
+  let left = total * p;
+  for (let i = 0; i < lengths.length; i++) {
+    if (left <= lengths[i] || i === lengths.length - 1) {
+      const t = lengths[i] ? Math.min(1, left / lengths[i]) : 1;
+      return {
+        x: points[i][0] + (points[i + 1][0] - points[i][0]) * t,
+        y: points[i][1] + (points[i + 1][1] - points[i][1]) * t,
+        segment: i,
+        segmentProgress: t,
+      };
+    }
+    left -= lengths[i];
+  }
+  const last = points.at(-1);
+  return { x: last[0], y: last[1], segment: points.length - 2, segmentProgress: 1 };
+}
+
+/** 서버 시각 하나로 관제와 휴대폰이 함께 쓰는 90초 대피 상태를 만든다. */
+export function photoScenarioSnapshot(startedAt, now = Date.now()) {
+  const running = Number.isFinite(startedAt);
+  const elapsedMs = running ? Math.max(0, now - startedAt) : 0;
+  const progress = running ? Math.min(1, elapsedMs / DURATION_MS) : 0;
+  const point = pointOnRoute(ROUTE, progress);
+  const remainingMeters = TOTAL_METERS * (1 - progress);
+  return {
+    ...point,
+    progress,
+    elapsedMs: Math.min(DURATION_MS, elapsedMs),
+    remainingMs: Math.max(0, DURATION_MS - elapsedMs),
+    remainingMeters,
+    stepsLeft: Math.ceil(remainingMeters / STEP_LENGTH),
+    phase: progress >= 1 ? 'arrived' : 'guiding',
+    timelineState: running ? (progress >= 1 ? 'arrived' : 'running') : 'armed',
+  };
+}
 
 export function isPhotoScenario(planId, hazards) {
   const fire = hazards?.[PHOTO_SCENARIO.fireEdgeId];

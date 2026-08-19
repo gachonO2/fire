@@ -191,6 +191,38 @@ export class RouteFollower {
   }
 
   /**
+   * 전체 경로 진행률로 안내기를 이동한다.
+   *
+   * 자동 시나리오에서는 휴대폰 걸음이 아니라 서버의 90초 시계가 위치의 원본이다.
+   * 관제와 같은 진행률을 넣어 현재 구간·화살표·남은 거리를 한꺼번에 맞춘다.
+   */
+  seekProgress(progress01) {
+    const progress = Math.max(0, Math.min(1, Number(progress01) || 0));
+    if (!this.segmentCount) return false;
+    if (progress >= 1) {
+      this.index = this.segmentCount;
+      this.stepsTaken = 0;
+      return true;
+    }
+
+    let total = 0;
+    for (let i = 0; i < this.segmentCount; i++) total += this.segmentMeters(i);
+    let traveled = total * progress;
+    for (let i = 0; i < this.segmentCount; i++) {
+      const meters = this.segmentMeters(i);
+      if (traveled <= meters || i === this.segmentCount - 1) {
+        this.index = i;
+        // 소수 걸음을 허용한다. 자동 시나리오는 0.25초마다 부드럽게 움직이므로
+        // 한 걸음 단위로 끊으면 관제 점과 휴대폰 점이 번갈아 앞서게 된다.
+        this.stepsTaken = Math.max(0, traveled / this.stepLength);
+        return true;
+      }
+      traveled -= meters;
+    }
+    return false;
+  }
+
+  /**
    * 이 구간에 들어설 때 얼마나 꺾어야 하나 (이전 구간 기준).
    *
    * **northOffset 없이도 맞는 값**이다 — 두 도면 방위의 차이라서 도면이 어느 쪽으로
@@ -252,7 +284,10 @@ export class RouteFollower {
     }
     if (!s.to) return { x: s.from.x, y: s.from.y, edgeId: null, progress: 1 };
 
-    const t = Math.min(1, this.stepsTaken / Math.max(1, this.segmentSteps()));
+    const meters = this.segmentMeters();
+    const t = meters > 0
+      ? Math.min(1, (this.stepsTaken * this.stepLength) / meters)
+      : 1;
     return {
       x: s.from.x + (s.to.x - s.from.x) * t,
       y: s.from.y + (s.to.y - s.from.y) * t,
