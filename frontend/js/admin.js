@@ -35,6 +35,8 @@ let staleRoutes = new Set();
 /** 사람이 답사한 지점 → 그 자리에서 잡힌 신호 개수 */
 let surveyedSpots = new Map();
 let metrics = [];
+let photoSyncInFlight = false;
+let lastPhotoPanelRender = 0;
 
 /**
  * 이 도면에 **진짜** 비콘이 있는가.
@@ -178,7 +180,7 @@ async function main() {
   api.on('positions', list => {
     positions = list;
     syncPhotoScenarioButton();
-    live?.update(livePositions());
+    live?.update(liveTrackPositions());
     // draw() 안에서 drawRoutes() 가 돌며 «도면 불일치» 판정을 낸다.
     // 목록·상세가 그 판정을 쓰므로 먼저 그려야 한 박자 늦지 않는다.
     draw();
@@ -207,9 +209,9 @@ async function main() {
   await refreshSurvey();
   // 답사는 사람이 걸어 다니며 늘린다 — 관제는 그게 쌓이는 것을 보고 있어야 한다
   setInterval(refreshSurvey, 4000);
-  // 시나리오 위치가 «45초 전 마지막 관측»으로 바뀌지 않도록 관제가 열려 있는
-  // 동안만 새 시각을 보낸다. 실제 앱의 주기 위치 보고와 같은 역할이다.
-  setInterval(keepPhotoScenarioAlive, 15_000);
+  // 서버가 계산한 90초 타임라인을 읽는다. 관제에서 따로 타이머를 돌리면 휴대폰과
+  // 몇 초씩 벌어지므로 좌표를 직접 만들지 않는다.
+  setInterval(syncPhotoScenarioPosition, 250);
   // 소식이 끊기는 것은 «시간이 지나서» 생기는 변화다. 새 값이 안 와도
   // 화면은 스스로 늙어야 한다.
   setInterval(() => { updateStats(); renderPeople(); renderSummary(); drawPicks(); }, 5000);
@@ -346,22 +348,12 @@ function isPhotoScenarioActive() {
     && Boolean(photoScenarioPosition());
 }
 
-function photoScenarioPayload() {
-  const [x, y] = PHOTO_SCENARIO.current;
-  return {
-    nodeId: 'J_NS4',
-    nodeName: 'FR 앞 · 현재 위치',
-    phase: 'guiding',
-    x, y,
-    edgeId: 'e9',
-    progress: 0.37,
-    confidence: 1,
-    source: 'beacon',
-    exitName: '비상구 (CREATIVE WORKSPACE 옆)',
-    stepsLeft: PHOTO_SCENARIO.totalSteps,
-    routeNodes: ['J_NS4', 'EXIT_CW'],
-    routeEdges: ['e7'],
-  };
+function upsertPhotoScenarioPosition(next) {
+  if (!next) return;
+  const position = { ...next, ts: next.serverNow ?? Date.now() };
+  const i = positions.findIndex(p => p.userId === PHOTO_SCENARIO.userId);
+  if (i < 0) positions = [...positions, position];
+  else positions = positions.map((p, index) => index === i ? { ...p, ...position } : p);
 }
 
 async function startPhotoScenario() {
@@ -381,7 +373,9 @@ async function startPhotoScenario() {
       label: PHOTO_SCENARIO.fireLabel,
     });
     await api.setDemoStand(PHOTO_SCENARIO.startNodeId);
-    await api.setPosition(PHOTO_SCENARIO.userId, photoScenarioPayload());
+    // 관제는 준비만 한다. 휴대폰이 안내 화면에 진입한 순간 서버 시계가 0초를
+    // 찍어야 두 화면이 출발부터 도착까지 정확히 함께 움직인다.
+    upsertPhotoScenarioPosition(await api.armPhotoScenario());
     selectedUser = PHOTO_SCENARIO.userId;
     syncPhotoScenarioButton();
     draw();
@@ -391,7 +385,7 @@ async function startPhotoScenario() {
     showError(err);
   } finally {
     btn.disabled = false;
-    btn.textContent = '사진 시나리오 실행';
+    syncPhotoScenarioButton();
   }
 }
 
@@ -416,13 +410,44 @@ async function resetScenario() {
   }
 }
 
-function keepPhotoScenarioAlive() {
-  if (!isPhotoScenarioActive()) return;
-  api.setPosition(PHOTO_SCENARIO.userId, photoScenarioPayload()).catch(() => {});
+async function syncPhotoScenarioPosition() {
+  if (!isPhotoScenarioActive() || photoSyncInFlight) return;
+  photoSyncInFlight = true;
+  try {
+    const snapshot = await api.getPhotoScenarioTimeline();
+    if (!snapshot) return;
+    upsertPhotoScenarioPosition(snapshot);
+    // 두 화면 모두 이 서버 좌표를 쓴다. 관제의 SVG 타이머나 LiveTrack의 자체
+    // 경로 계산에 맡기지 않아야 휴대폰과 같은 지점에 있다.
+    live?.update(liveTrackPositions());
+    drawPhotoScenario();
+    drawPicks();
+    updateStats();
+    syncPhotoScenarioButton();
+    const now = Date.now();
+    if (now - lastPhotoPanelRender >= 1000) {
+      lastPhotoPanelRender = now;
+      renderPeople();
+      renderDetail();
+      renderSummary();
+    }
+  } catch (_) {
+    // 잠깐 끊겨도 마지막 서버 좌표를 유지한다. 별도 시계를 돌려 앞서가면 안 된다.
+  } finally {
+    photoSyncInFlight = false;
+  }
 }
 
 function syncPhotoScenarioButton() {
-  $('btn-photo-scenario')?.setAttribute('aria-pressed', String(isPhotoScenarioActive()));
+  const btn = $('btn-photo-scenario');
+  if (!btn) return;
+  const active = isPhotoScenarioActive();
+  const timeline = photoScenarioPosition()?.timelineState;
+  btn.setAttribute('aria-pressed', String(active));
+  btn.textContent = !active ? '사진 시나리오 실행'
+    : timeline === 'armed' ? '휴대폰 연결 대기 중'
+      : timeline === 'arrived' ? '90초 대피 완료'
+        : '자동 대피 진행 중';
 }
 
 const PHASE = {
@@ -459,10 +484,17 @@ function livePositions() {
     : alive;
 }
 
+/** 사진 시나리오의 파란 점은 서버 좌표를 그대로 그리는 전용 레이어가 담당한다. */
+function liveTrackPositions() {
+  return livePositions().filter(p =>
+    !isPhotoScenarioActive() || p.userId !== PHOTO_SCENARIO.userId);
+}
+
 const SOURCE = {
   beacon:    '비콘 확정',
   pdr:       '걸음 추정',
   simulated: '가상 비콘',
+  'scenario-clock': '서버 자동 이동',
   server:    '관제 지정',
   manual:    '수동 지정',
 };
@@ -744,7 +776,9 @@ function renderDetail() {
   const src = SOURCE[p.source] || p.source || '알 수 없음';
   const total = (p.routeNodes || []).length;
   const left = p.stepsLeft ?? 0;
-  const done = total > 1 ? Math.max(0, Math.min(1, (total - left) / total)) : 0;
+  const done = Number.isFinite(p.progress)
+    ? Math.max(0, Math.min(1, p.progress))
+    : total > 1 ? Math.max(0, Math.min(1, (total - left) / total)) : 0;
 
   box.innerHTML = `
     <div class="panel-head">
@@ -957,7 +991,10 @@ function drawPhotoScenario() {
   const u = width / 400;
   const route = PHOTO_SCENARIO.route.map(([x, y]) => `${x},${y}`).join(' ');
   const [fx, fy] = PHOTO_SCENARIO.fire;
-  const [cx, cy] = PHOTO_SCENARIO.current;
+  const current = photoScenarioPosition();
+  const [cx, cy] = Number.isFinite(current?.x) && Number.isFinite(current?.y)
+    ? [current.x, current.y]
+    : PHOTO_SCENARIO.current;
   const end = PHOTO_SCENARIO.route.at(-1);
 
   svg.innerHTML = `
@@ -996,9 +1033,9 @@ function drawPhotoScenario() {
     <circle cx="${fx}" cy="${fy}" r="${u * 12}" fill="none" stroke="#ffb0a8"
       stroke-width="${u * .7}" stroke-dasharray="${u * 2.2} ${u * 2.2}"/>
 
-    <circle cx="${cx}" cy="${cy}" r="${u * 6.2}" fill="var(--route)" fill-opacity=".18"
+    <circle class="photo-current-ring" cx="${cx}" cy="${cy}" r="${u * 6.2}" fill="var(--route)" fill-opacity=".18"
       stroke="var(--route)" stroke-width="${u * 1.5}"/>
-    <circle cx="${cx}" cy="${cy}" r="${u * 2.7}" fill="var(--route)" stroke="#fff"
+    <circle class="photo-current-dot" cx="${cx}" cy="${cy}" r="${u * 2.7}" fill="var(--route)" stroke="#fff"
       stroke-width="${u * .7}"/>
 
     <circle cx="${end[0]}" cy="${end[1]}" r="${u * 5.8}" fill="none"
@@ -1257,11 +1294,27 @@ function drawSigns() {
   // 아니라 «간판» 이 되고, 여섯 개가 도면을 덮는다.
   const sh = w / 48;
   box.style.setProperty('--sh', `${sh}px`);
-  box.style.setProperty('--sw', `${sh * 1.5}px`);
+  box.style.setProperty('--sw', `${sh}px`);
 
   const exits = plan.nodes.filter(n => n.type === 'exit' && Number.isFinite(n.x));
-  box.innerHTML = exits.map(n =>
-    `<b style="--x:${n.x}px;--y:${n.y}px" title="${n.name}"><span>EXIT</span></b>`).join('');
+  box.innerHTML = exits.map(n => {
+    const target = isPhotoScenarioActive() && n.id === PHOTO_SCENARIO.exitNodeId;
+    // 사용자가 준 초록색 비상구 픽토그램을 벡터로 다시 그린다. 사진을 작게
+    // 축소하는 것보다 3D 기울기에서도 문·사람 윤곽이 또렷하다.
+    return `<b class="${target ? 'target' : ''}"
+      style="--x:${n.x}px;--y:${n.y}px;${target ? `--size:${sh * 1.55}px` : ''}"
+      title="${n.name}">
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        <rect width="64" height="64" rx="2" fill="#00b879"/>
+        <path d="M14 8h35v36h-7V15H21v13h-7V8zm0 26h7v13l9 9H20l-6-7V34zm28 7h7l4 10H40z"
+          fill="#fff"/>
+        <circle cx="29" cy="19" r="5" fill="#fff"/>
+        <path d="M29 27h9l5 10M30 28l-8 10h-7M33 31l1 14M34 44l9 8M32 40l-8 13"
+          fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"
+          stroke-linejoin="round"/>
+      </svg>
+    </b>`;
+  }).join('');
 }
 
 /**
