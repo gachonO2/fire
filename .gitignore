@@ -23,3 +23,6 @@ ml/detector/outputs/
 # 코랩 업로드용으로 묶은 임시 꾸러미
 ml-colab.zip
 evacuation_mvp_full_with_models.zip
+
+# 확인용으로 꺼낸 촬영 사진 (원본은 backend/data/plans.json 안에 있다)
+촬영도면/

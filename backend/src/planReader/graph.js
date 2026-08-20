@@ -45,6 +45,41 @@ const MERGE_RATIO = 0.02;
 const EXTRA_EDGE_FACTOR = 1.4;
 
 /**
+ * 기호가 이미지 가로에서 차지할 수 있는 최대 비율.
+ *
+ * 피난안내도의 비상구 픽토그램은 **도면 전체 대비 아주 작다** — 한 층에 10~30개가
+ * 흩어져 있으니 그럴 수밖에 없다. 실측(853px 사진)에서 진짜 픽토그램은 12~26px,
+ * 즉 가로의 1.4~3% 였다.
+ *
+ * 이 문턱이 없으면 상단의 초록 제목 띠와 큰 글씨가 통째로 "비상구"로 잡힌다.
+ * 실제로 그랬다 — 한 장에서 61~117px 짜리 가짜 비상구가 9개 나왔고, 편집기에는
+ * 도면 바깥 허공에 비상구가 찍혔다. 크기만 봐도 걸러낼 수 있는 것들이다.
+ */
+const MAX_SYMBOL_RATIO = 0.06;
+
+/** 크기 문턱을 적용할 클래스 — 실(room)은 크므로 뺀다 */
+const SYMBOL_CLASSES = new Set([
+  'exit', 'stair', 'elevator', 'extinguisher', 'hydrant', 'you_are_here', 'door',
+]);
+
+/**
+ * 범례(凡例) 판정 기준.
+ *
+ * 범례는 "이 그림이 비상구입니다"를 설명하는 표지, 즉 **실제 위치가 아니다.**
+ * 그런데 범례 아이콘은 도면 안 픽토그램보다 크고 선명해서 모델이 **더 잘 잡는다** —
+ * 실측에서 확신도가 0.86 으로 가장 높았다. 걸러내지 않으면 대피 경로의 출구가
+ * 범례 상자 안에 생기고, 시각장애인이 벽 앞 안내판으로 안내된다.
+ *
+ * 판별은 배치로 한다. 범례는 좁은 세로 띠 안에 **여러 종류의 기호가 줄지어** 있고,
+ * 도면 안에서는 그런 배치가 나오지 않는다(같은 종류가 한 곳에 몰리는 일은 있어도,
+ * 비상구·소화기·소화전이 한 줄로 정렬되지는 않는다).
+ */
+const LEGEND_X_TOL = 0.05;    // 가로 위치가 이 안이면 같은 줄로 본다
+const LEGEND_MIN_ITEMS = 3;   // 이만큼 쌓여야 목록으로 본다
+const LEGEND_MIN_KINDS = 2;   // 종류가 이만큼 섞여야 범례로 본다
+const LEGEND_PAD = 0.02;      // 판정된 범례 상자를 이만큼 넓혀 주변까지 제외
+
+/**
  * 탐지 결과를 지점 목록으로 바꾼다.
  *
  * @param detections  [{className, confidence, box:[x1,y1,x2,y2]}] — 0~1 정규화
@@ -56,9 +91,19 @@ export function nodesFromDetections(detections) {
   const nodes = [];
   const roomBoxes = [];
 
+  // 도면에 실제로 있는 기호만 남긴다. 아래 두 걸름망이 없으면 편집기에
+  // 제목 글씨와 범례 아이콘이 "비상구"로 찍힌다 — 실측에서 5개 중 4개가 그랬다.
+  const { kept, oversized, inLegend } = screenDetections(detections);
+  if (oversized.length) {
+    warnings.push(`기호로 보기엔 너무 큰 탐지 ${oversized.length}개를 버렸습니다(제목 글씨·초록 띠를 비상구로 오인한 것). 도면에 실제로 있는 픽토그램이 빠졌다면 직접 찍어주세요.`);
+  }
+  if (inLegend.length) {
+    warnings.push(`범례(기호 설명란)에서 잡힌 ${inLegend.length}개를 버렸습니다. 범례는 실제 위치가 아니라 설명이기 때문입니다.`);
+  }
+
   // 확신이 높은 것부터 자리를 잡는다. 겹치는 탐지가 있을 때 남는 쪽이
   // 더 확실한 쪽이 되도록 — 뒤에 오는 흐린 탐지는 병합되어 사라진다.
-  const sorted = [...detections].sort((a, b) => b.confidence - a.confidence);
+  const sorted = [...kept].sort((a, b) => b.confidence - a.confidence);
 
   for (const d of sorted) {
     const type = TYPE_BY_CLASS[d.className];
@@ -198,6 +243,90 @@ export function inferCorridorEdges(nodes, roomBoxes) {
   return { nodes: [...nodes, ...extraNodes], edges, warnings };
 }
 
+// ------------------------------------------------------------- 걸름망
+
+/**
+ * 탐지 결과에서 **도면 위의 실제 기호가 아닌 것**을 걸러낸다.
+ *
+ * 모델은 초록 픽토그램을 찾도록 학습됐고 실제로 잘 찾는다. 문제는 도면에는
+ * 픽토그램처럼 생긴 것이 세 군데 있다는 점이다.
+ *
+ *   1. 도면 안       ← 우리가 원하는 것. 실제 비상구 위치.
+ *   2. 범례          "■ 비상구 방향" 같은 설명. 실제 위치가 아니다.
+ *   3. 제목·초록 띠   상단 헤더. 초록 바탕이라 통째로 비상구로 잡힌다.
+ *
+ * 2·3 은 모델이 못 배운 것이 아니라 **아무도 가르친 적이 없는** 구분이다.
+ * 재학습으로도 고칠 수 있지만, 여기서 걸러내면 지금 가진 가중치 그대로 나아진다.
+ *
+ * @returns {{kept, oversized, inLegend}} 버린 것도 돌려준다 — 사람에게 알려야 하므로
+ */
+function screenDetections(detections) {
+  const oversized = [];
+  const sized = [];
+
+  // 3. 크기 — 픽토그램은 도면 대비 작다. 큰 것은 기호가 아니라 배경이다.
+  for (const d of detections) {
+    if (SYMBOL_CLASSES.has(d.className) && (d.box[2] - d.box[0]) > MAX_SYMBOL_RATIO) {
+      oversized.push(d);
+    } else {
+      sized.push(d);
+    }
+  }
+
+  // 2. 범례 — 좁은 세로 띠에 여러 종류가 줄지어 있으면 설명란이다
+  const zones = findLegendZones(sized);
+  const inLegend = [];
+  const kept = [];
+  for (const d of sized) {
+    const cx = (d.box[0] + d.box[2]) / 2;
+    const cy = (d.box[1] + d.box[3]) / 2;
+    (zones.some(z => cx >= z.x1 && cx <= z.x2 && cy >= z.y1 && cy <= z.y2)
+      ? inLegend : kept).push(d);
+  }
+  return { kept, oversized, inLegend };
+}
+
+/**
+ * 범례로 보이는 영역들을 찾는다.
+ *
+ * 가로 위치가 거의 같은 기호들을 한 묶음으로 모으고, 그 묶음이
+ * **여러 종류가 섞인 세로 목록**이면 범례로 본다. 도면 안에서는 비상구·소화기·
+ * 소화전이 한 줄로 정렬되는 일이 없다 — 그런 배치는 설명란에서만 나온다.
+ */
+function findLegendZones(detections) {
+  const symbols = detections
+    .filter(d => SYMBOL_CLASSES.has(d.className))
+    .map(d => ({ ...d, cx: (d.box[0] + d.box[2]) / 2, cy: (d.box[1] + d.box[3]) / 2 }))
+    .sort((a, b) => a.cx - b.cx);
+
+  const zones = [];
+  let group = [];
+  const flush = () => {
+    if (group.length >= LEGEND_MIN_ITEMS
+        && new Set(group.map(g => g.className)).size >= LEGEND_MIN_KINDS) {
+      const ys = group.map(g => g.cy);
+      const xs = group.map(g => g.cx);
+      const height = Math.max(...ys) - Math.min(...ys);
+      const width = Math.max(...xs) - Math.min(...xs);
+      // 가로로 늘어선 건 범례가 아니다 — 복도를 따라 놓인 실제 기호일 수 있다
+      if (height > width) {
+        zones.push({
+          x1: Math.min(...xs) - LEGEND_PAD, x2: Math.max(...xs) + LEGEND_PAD,
+          y1: Math.min(...ys) - LEGEND_PAD, y2: Math.max(...ys) + LEGEND_PAD,
+        });
+      }
+    }
+    group = [];
+  };
+
+  for (const s of symbols) {
+    if (group.length && s.cx - group[group.length - 1].cx > LEGEND_X_TOL) flush();
+    group.push(s);
+  }
+  flush();
+  return zones;
+}
+
 // ------------------------------------------------------------------ 기하
 
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -260,4 +389,4 @@ function segmentsCross(p1, p2, p3, p4) {
 
 const cross = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
 
-export const _internal = { segmentIntersectsBox, nearestEdgeMidpoint, crossesAnyRoom };
+export const _internal = { segmentIntersectsBox, nearestEdgeMidpoint, crossesAnyRoom, screenDetections, findLegendZones };
