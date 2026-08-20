@@ -1863,6 +1863,21 @@ function wireOrbit() {
   const body = document.querySelector('.ops-body');
   if (!stage || !inner) return;
 
+  /**
+   * 이보다 적게 움직였으면 **끌기가 아니라 클릭**이다.
+   *
+   * 3px 이었다. 그런데 사람 손은 트랙패드에서 누르고 떼는 사이에 5~8px 쯤
+   * 예사로 흔들린다. 그 흔들림이 «끌었다» 로 판정돼 놓을 때의 클릭을 통째로
+   * 삼켰고, 결과는 «화재를 골라 방을 눌러도 아무 일이 없다» 였다. 마우스로
+   * 또박또박 누르면 되고 트랙패드로는 안 되니, 되다 안 되다 하는 것으로
+   * 보였을 것이다.
+   *
+   * 브라우저가 클릭과 끌기를 가르는 값도 5px 안팎이다. 트랙패드는 그보다
+   * 더 흔들리므로 10px 로 둔다. 지도를 옮기려는 사람은 그보다 훨씬 많이
+   * 끈다 — 이 값을 넉넉히 줘서 잃는 것은 없다.
+   */
+  const CLICK_SLOP = 10;
+
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const read = k => parseFloat(getComputedStyle(inner).getPropertyValue(k)) || 0;
   let drag = null;
@@ -1897,7 +1912,7 @@ function wireOrbit() {
       // 0도(완전 평면)~78도. 그 너머는 판이 선처럼 얇아져 아무것도 안 보인다.
       inner.style.setProperty('--tilt', clamp(drag.tilt0 + dy * 0.35, 0, 78).toFixed(2) + 'deg');
       inner.style.setProperty('--spin', (drag.spin0 - dx * 0.35).toFixed(2) + 'deg');
-      if (drag.moved > 3) body?.setAttribute('data-view', 'iso');
+      if (drag.moved > CLICK_SLOP) body?.setAttribute('data-view', 'iso');
       fitStage();
     } else {
       pan = { x: drag.panx + dx, y: drag.pany + dy };
@@ -1911,7 +1926,7 @@ function wireOrbit() {
     drag = null;
     stage.classList.remove('dragging');
     try { stage.releasePointerCapture(e.pointerId); } catch (_) {}
-    if (moved > 3) {
+    if (moved > CLICK_SLOP) {
       const eat = ev => { ev.stopPropagation(); ev.preventDefault(); };
       stage.addEventListener('click', eat, { capture: true, once: true });
       setTimeout(() => stage.removeEventListener('click', eat, { capture: true }), 0);
