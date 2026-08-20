@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>걷기 답사 — 실내 대피 안내</title>
+<style>
+  /* 손에 들고 **걸으면서** 보는 화면이다. 걸으며 읽을 수 있는 크기가 아니면
+     사람은 멈춰서 보게 되고, 멈추면 걸음 수와 신호의 짝이 흐트러진다.
+     그래서 글씨가 크고 버튼이 손가락만 하다. */
+  :root {
+    --bg: #0d1117; --card: #161b22; --line: #262d36;
+    --fg: #e6edf3; --muted: #8b949e;
+    --accent: #4d9fff; --ok: #2fd6a6; --warn: #e79a3c; --bad: #ff4438;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    padding: max(16px, env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 16px; margin-bottom: 12px;
+  }
+  .card h2 { font-size: 13px; margin: 0 0 10px; color: var(--muted);
+    font-weight: 600; letter-spacing: .04em; }
+
+  select, button {
+    font: inherit; width: 100%; border-radius: 11px;
+    border: 1px solid var(--line); background: #1c232c; color: var(--fg);
+    padding: 14px; -webkit-appearance: none; appearance: none;
+  }
+  button { font-weight: 650; cursor: pointer; }
+  button.go { background: var(--accent); border-color: var(--accent); color: #04121f; }
+  button.stop { background: var(--bad); border-color: var(--bad); color: #fff; }
+  button:disabled { opacity: .4; }
+  button + button, select + button, label + select { margin-top: 10px; }
+
+  /* 걸으며 보는 숫자 — 이 셋이 «지금 되고 있나» 의 전부다 */
+  .live { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .live div { text-align: center; }
+  .live b { display: block; font-size: 32px; font-variant-numeric: tabular-nums;
+    line-height: 1.1; }
+  .live span { font-size: 12px; color: var(--muted); }
+  .live .on b { color: var(--ok); }
+
+  .why {
+    font-size: 13px; line-height: 1.6; color: var(--warn);
+    background: rgba(231,154,60,.1); border: 1px solid rgba(231,154,60,.3);
+    border-radius: 11px; padding: 12px; margin-top: 10px;
+  }
+  .why code { background: rgba(0,0,0,.35); border-radius: 4px; padding: 1px 5px;
+    font-size: 12px; word-break: break-all; }
+  .ok  { color: var(--ok); }
+  .bad { color: var(--bad); }
+  .log { font-size: 13px; color: var(--muted); margin-top: 10px;
+    max-height: 190px; overflow: auto; white-space: pre-wrap; }
+  .hint { font-size: 13px; color: var(--muted); margin-top: 10px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+</style>
+</head>
+<body>
+  <h1>걷기 답사</h1>
+  <p class="sub">출발을 찍고 <b>한 방향으로 쭉</b> 걸어서 도착을 찍습니다. 되돌아 걸으면 안 됩니다.</p>
+
+  <div class="card">
+    <h2>수신 상태</h2>
+    <div class="live">
+      <div id="s-scan"><b id="n-dev">—</b><span>잡힌 기기</span></div>
+      <div id="s-step"><b id="n-step">0</b><span>걸음</span></div>
+      <div id="s-up"><b id="n-up">0</b><span>올린 묶음</span></div>
+    </div>
+    <div id="why" class="why" hidden></div>
+  </div>
+
+  <div class="card" id="setup">
+    <h2>① 출발 지점</h2>
+    <label for="from">지금 서 있는 곳</label>
+    <select id="from"><option>도면 불러오는 중…</option></select>
+    <button id="btn-start" class="go">답사 시작 — 여기서부터 걷습니다</button>
+    <p class="hint">시작을 누르면 블루투스 권한을 묻습니다. 허용해야 신호가 잡힙니다.</p>
+  </div>
+
+  <div class="card" id="walking" hidden>
+    <h2>② 도착 지점</h2>
+    <label for="to">지금 도착한 곳</label>
+    <select id="to"></select>
+    <button id="btn-finish" class="go">답사 끝 — 여기까지 걸었습니다</button>
+    <button id="btn-cancel" class="stop">버리기</button>
+  </div>
+
+  <div class="card">
+    <h2>기록</h2>
+    <div id="log" class="log">준비 중…</div>
+  </div>
+
+<script type="module" src="./js/survey-walk.js"></script>
+</body>
+</html>

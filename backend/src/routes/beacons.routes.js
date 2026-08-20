@@ -24,6 +24,8 @@
 import { Router } from 'express';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { remapSurvey } from '../../../shared/survey-remap.js';
+import { bakeWalk } from '../../../shared/walk-survey.js';
+import { buildGraph, shortestPath } from '../../../shared/pathfinding.js';
 import { getRepo } from '../repositories/index.js';
 import { FloorPlan } from '../../../shared/floor-plan.js';
 import { BeaconMapper } from '../../../shared/beacon-map.js';
@@ -402,4 +404,132 @@ beaconRoutes.delete('/beacon-map', async (req, res) => {
   m?.reset();
   publish('beaconMap', []);
   res.json({ ok: true });
+});
+
+
+/* ─────────────────────── 걷기 답사 ───────────────────────
+ *
+ * **출발 찍고, 걷고, 도착 찍는다.** 그게 전부다.
+ *
+ * 지금까지 답사는 «지점마다 서서 10초 태그» 였다. 42지점이면 한 시간이 넘고,
+ * 그것도 기기 한 대분이다 — Web Bluetooth 의 `device.id`, macOS 의 peripheral
+ * UUID, iOS 의 identifier 가 전부 (기기, 출처)마다 다른 값이라, 폰을 한 대
+ * 늘릴 때마다 건물을 다시 걸어야 한다. 그 노동을 없애지 않으면 «폰으로
+ * 측위» 는 영영 안 된다.
+ *
+ * 걸으며 받은 신호를 **경로 위 어디쯤이었나** 로 되짚어 붙인다. 그 «어디쯤»
+ * 은 걸음 수의 비율로 나오고, 경로의 모양은 도면 그래프가 안다. 방위는 안
+ * 쓴다 — 실내 나침반은 철골·배전반에 수십 도씩 틀어지고 그 오차가 쌓인다.
+ *
+ * 굽는 규칙은 `shared/walk-survey.js` 에 있고 테스트가 지키고 있다.
+ * 여기서는 세션을 들고 있다가 넘겨줄 뿐이다.
+ */
+
+/** 한 번에 하나. 두 사람이 동시에 걸으면 신호가 섞여 둘 다 못 쓴다. */
+let walk = null;
+
+beaconRoutes.post('/survey/walk/start', async (req, res) => {
+  const { fromNodeId } = req.body || {};
+  const plan = await (await getRepo()).getActivePlan();
+  if (!plan) return res.status(404).json({ error: '활성 도면이 없습니다.' });
+  if (!plan.nodes.some(n => n.id === fromNodeId)) {
+    return res.status(400).json({ error: `도면에 없는 지점입니다: ${fromNodeId}` });
+  }
+  walk = { planId: plan.id, from: fromNodeId, samples: [], startedAt: Date.now() };
+  console.log(`  걷기 답사 시작: ${fromNodeId}`);
+  res.json({ ok: true, from: fromNodeId, startedAt: walk.startedAt });
+});
+
+/**
+ * 걸으며 올린다. `steps` 는 **출발부터 누적된** 걸음 수다.
+ *
+ * 누적으로 받는 이유: 구간 걸음(delta)으로 받으면 요청 하나가 유실될 때
+ * 그 뒤 전부가 앞으로 당겨진다. 누적이면 다음 요청이 스스로 고친다.
+ */
+beaconRoutes.post('/survey/walk/sample', (req, res) => {
+  if (!walk) return res.status(409).json({ error: '걷기 답사가 시작되지 않았습니다.' });
+  const { readings, steps } = req.body || {};
+  if (!Array.isArray(readings)) return res.status(400).json({ error: 'readings 배열이 필요합니다.' });
+  lastObservedAt = Date.now();   // 진짜 수신기가 붙어 있다는 증거
+  walk.samples.push({ steps: Number(steps) || 0, readings, at: Date.now() });
+  res.json({
+    ok: true,
+    samples: walk.samples.length,
+    steps: Number(steps) || 0,
+    devices: new Set(walk.samples.flatMap(s => s.readings.map(r => r.beaconId))).size,
+  });
+});
+
+beaconRoutes.post('/survey/walk/finish', async (req, res) => {
+  if (!walk) return res.status(409).json({ error: '걷기 답사가 시작되지 않았습니다.' });
+  const { toNodeId } = req.body || {};
+  const plan = await (await getRepo()).getActivePlan();
+  if (!plan) return res.status(404).json({ error: '활성 도면이 없습니다.' });
+  if (plan.id !== walk.planId) {
+    walk = null;
+    return res.status(409).json({ error: '걷는 도중 도면이 바뀌었습니다. 다시 걸어야 합니다.' });
+  }
+  const fp = plan instanceof FloorPlan ? plan : new FloorPlan(plan);
+  if (!fp.getNode(toNodeId)) {
+    return res.status(400).json({ error: `도면에 없는 지점입니다: ${toNodeId}` });
+  }
+
+  // 지나온 길 — **화재를 무시하고** 순수한 통행 그래프로 푼다. 답사는
+  // 평시에 걷는 일이고, 그때 막힌 통로를 피해 돌아간 경로로 되짚으면
+  // 실제로 걸은 자리와 어긋난다.
+  const adj = buildGraph(fp, {}, { fireMode: false });
+  // `shortestPath` 는 `{nodes, edges, distance}` 를 준다 — 배열이 아니다.
+  const ids = shortestPath(adj, walk.from, toNodeId)?.nodes;
+  if (!ids?.length) {
+    return res.status(409).json({ error: `${walk.from} 에서 ${toNodeId} 로 가는 길이 도면에 없습니다.` });
+  }
+  const routeNodes = ids.map(id => fp.getNode(id)).filter(Boolean);
+
+  const baked = bakeWalk(routeNodes, walk.samples);
+
+  // **사람이 서서 태그한 것을 덮어쓰지 않는다.** 걷기 답사는 지나가며 만든
+  // 값이라 서서 만든 것보다 거칠다. 겹치면 서 있던 쪽이 이긴다.
+  let added = 0;
+  for (const [beaconId, nodeId] of Object.entries(baked.mapping)) {
+    if (surveyed[beaconId]) continue;
+    surveyed[beaconId] = nodeId;
+    added++;
+  }
+  for (const n of routeNodes) spotXY[n.id] = [n.x, n.y];
+  saveSurvey();
+
+  const took = walk.samples.length;
+  const from = walk.from;
+  walk = null;
+  console.log(`  걷기 답사 완료: ${from} → ${toNodeId} · ${baked.steps}걸음`
+    + ` · 기기 ${baked.devices}개 중 ${baked.kept}개 채택 · 새로 ${added}개`);
+
+  res.json({
+    ok: true,
+    from, to: toNodeId,
+    route: ids,
+    steps: baked.steps,
+    samples: took,
+    devices: baked.devices,
+    kept: baked.kept,
+    added,
+    spots: baked.spots,
+    dropped: baked.dropped.slice(0, 20),
+    surveyed: Object.keys(surveyed).length,
+  });
+});
+
+/** 잘못 걸었을 때 — 굽지 않고 버린다 */
+beaconRoutes.delete('/survey/walk', (req, res) => {
+  walk = null;
+  res.json({ ok: true });
+});
+
+/** 지금 걷는 중인가 (화면이 버튼 상태를 정하는 데 쓴다) */
+beaconRoutes.get('/survey/walk', (req, res) => {
+  res.json(walk
+    ? { active: true, from: walk.from, samples: walk.samples.length,
+      devices: new Set(walk.samples.flatMap(s => s.readings.map(r => r.beaconId))).size,
+      steps: walk.samples.at(-1)?.steps ?? 0 }
+    : { active: false });
 });
