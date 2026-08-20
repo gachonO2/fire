@@ -232,7 +232,10 @@ function draw() {
     walls: wallData?.walls || null,
     walkGrid,
     hazards,
-    sensors,
+    // **센서는 지도에 안 넘긴다.** 지도가 그리면 위험 레이어 밑에 깔려
+    // 불꽃에 묻힌다. 관제에서 제일 중요한 숫자가 «감지기가 몇 도를 읽었나»
+    // 인데 그게 안 보이면 감지기를 단 의미가 없다. 위 레이어에 직접 그린다.
+    sensors: [],
     positions: [],   // 점은 live-track 레이어가 부드럽게 그린다
     onEdgeClick: edge => applyTool({ edge }),
     onNodeClick: node => { if (currentTool === 'temp') applyTool({ node }); },
@@ -275,6 +278,7 @@ function draw() {
   drawRooms();
   drawRoutes();
   drawHazards();
+  drawSensors();
   drawPhotoScenario();
   drawPicks();
   drawWalls();
@@ -376,8 +380,16 @@ function drawHazards() {
   if (!vb) { svg.innerHTML = ''; return; }
   svg.setAttribute('viewBox', vb);
 
+  // **감지기가 만든 위험은 덩어리로 안 그린다.**
+  //
+  // 감지기 하나가 60℃ 를 넘으면 그 분기점에 닿은 통로가 한꺼번에 끊긴다
+  // (여섯 개까지 간다). 그걸 다 덩어리로 그리면 진짜 불 하나 옆에 가짜 불
+  // 여섯 개가 피어오른다. 열이 어디서 왔는지는 **그 불**이 이미 말하고 있고,
+  // 감지기가 무엇을 읽었는지는 지점마다 붙는 온도 배지가 말한다.
+  // 통로가 끊겼다는 사실은 가늘어진 통로 선으로 남는다.
   const entries = Object.entries(hazards || {})
-    .filter(([, h]) => h && h.type && h.type !== 'clear');
+    .filter(([, h]) => h && h.type && h.type !== 'clear'
+      && h.source !== 'temperature');
   if (!entries.length) { svg.innerHTML = ''; return; }
 
   const u = Number(vb.split(/\s+/)[2]) / 400;
@@ -465,8 +477,12 @@ const HAZARD_TINT = {
   smoke: { core: '#eef3f8', mid: '#a8b3c0', outer: '#5b6572', a0: .9,  a1: .58, a2: .3 },
   crowd: { core: '#ffd79a', mid: '#e79a3c', outer: '#6b4a10', a0: .9,  a1: .5,  a2: .22 },
   temp:  { core: '#ffcf9a', mid: '#ff8a3c', outer: '#7a3a08', a0: .9,  a1: .55, a2: .26 },
+  heat:  { core: '#ffcf9a', mid: '#ff8a3c', outer: '#7a3a08', a0: .9,  a1: .55, a2: .26 },
+  warm:  { core: '#ffe0b8', mid: '#e79a3c', outer: '#6b4a10', a0: .8,  a1: .45, a2: .2 },
+  blocked: { core: '#c9d2dc', mid: '#8b949e', outer: '#3a424c', a0: .85, a1: .5, a2: .24 },
 };
-const HAZARD_WORD = { fire: '화재', smoke: '연기', crowd: '혼잡', temp: '고온' };
+const HAZARD_WORD = { fire: '화재', smoke: '연기', crowd: '혼잡', temp: '고온',
+  heat: '과열', warm: '온도 상승', blocked: '차단' };
 
 /**
  * 위험이 «어디에» 있는가.
@@ -475,6 +491,61 @@ const HAZARD_WORD = { fire: '화재', smoke: '연기', crowd: '혼잡', temp: '�
  * 찍어 준 자리가 있으므로 그것을 우선한다 — 통로 중점으로 옮기면 사용자가
  * 그린 그림과 화면이 어긋난다.
  */
+/**
+ * 열감지기 판독값 — **불이 났다는 것을 기계가 먼저 안다.**
+ *
+ * 이 숫자가 관제에서 제일 중요하다. 사람이 「화재」를 누르는 것은 시연을
+ * 시작하는 동작이고, 그 다음부터는 감지기가 60℃ 를 넘겨 **시스템이 스스로**
+ * 통로를 끊는다(`shared/hazard-rules.js` 의 `TEMP.BLOCK`). 그 순간을 화면이
+ * 못 보여 주면 «사람이 정해 주면 경로를 다시 그리는 시스템» 으로만 읽힌다.
+ *
+ * 그래서 위험 레이어보다 **위에** 그린다. 밑에 깔았더니 정작 제일 뜨거운
+ * 감지기가 그 불의 불꽃에 통째로 묻혔다.
+ */
+function drawSensors() {
+  const svg = document.getElementById('sensor-layer');
+  const base = document.getElementById('admin-map');
+  const plan = api.floorPlan;
+  if (!svg || !base || !plan) return;
+  const vb = base.getAttribute('viewBox');
+  if (!vb) { svg.innerHTML = ''; return; }
+  svg.setAttribute('viewBox', vb);
+
+  const list = (sensors || []).filter(x => x?.nodeId && Number.isFinite(x.celsius));
+  if (!list.length) { svg.innerHTML = ''; return; }
+
+  const u = Number(vb.split(/\s+/)[2]) / 400;
+  const now = Date.now();
+  svg.innerHTML = list.map(x => {
+    const n = plan.getNode?.(x.nodeId) ?? plan.nodes.find(m => m.id === x.nodeId);
+    if (!n) return '';
+    const c = x.celsius;
+    const state = c >= TEMP.BLOCK ? 'block' : c >= TEMP.WARN ? 'warn' : 'ok';
+    const stale = now - (x.ts ?? now) > TEMP.STALE_MS;
+    const tint = { ok: '#4d9fff', warn: '#e79a3c', block: '#ff4438' }[state];
+    const w = u * 9.4;
+    const h = u * 4.6;
+    // 경보 중이면 테를 두껍게 하고 맥이 뛴다 — 숫자만으로는 여섯 개 중 어느
+    // 것이 우는지 흘깃 봐서 안 갈린다.
+    const ring = state === 'block'
+      ? `<circle cx="${n.x}" cy="${n.y}" r="${u * 3.4}" fill="none" stroke="${tint}"
+           stroke-width="${u * 0.7}" opacity=".9">
+           <animate attributeName="r" values="${u * 3}; ${u * 6}; ${u * 3}"
+             dur="1.5s" repeatCount="indefinite"/>
+           <animate attributeName="opacity" values=".9;0;.9" dur="1.5s" repeatCount="indefinite"/>
+         </circle>` : '';
+    return `${ring}
+      <circle cx="${n.x}" cy="${n.y}" r="${u * 1.5}" fill="${tint}"
+        stroke="rgba(8,10,14,.9)" stroke-width="${u * 0.5}" opacity="${stale ? 0.45 : 1}"/>
+      <rect x="${n.x - w / 2}" y="${n.y + u * 2}" width="${w}" height="${h}" rx="${u * 1.2}"
+        fill="${tint}" opacity="${stale ? 0.4 : 0.95}"
+        stroke="rgba(8,10,14,.75)" stroke-width="${u * 0.4}"/>
+      <text x="${n.x}" y="${n.y + u * 5.25}" text-anchor="middle"
+        font-size="${u * 3.1}" font-weight="800" fill="#0b0f14"
+        >${Math.round(c)}°C${stale ? ' ⚠' : ''}</text>`;
+  }).join('');
+}
+
 function hazardCenter(edgeId) {
   if (edgeId === PHOTO_SCENARIO.fireEdgeId && api.floorPlan?.id === PHOTO_SCENARIO.planId) {
     return { x: PHOTO_SCENARIO.fire[0], y: PHOTO_SCENARIO.fire[1] };
@@ -500,7 +571,7 @@ function hazardCenter(edgeId) {
 let spreadTimer = null;
 function tickSpread() {
   const any = Object.values(hazards || {}).some(h => h?.type && h.type !== 'clear');
-  const tick = () => { drawHazards(); drawRooms(); };
+  const tick = () => { drawHazards(); drawSensors(); drawRooms(); };
   if (any && !spreadTimer) spreadTimer = setInterval(tick, 1000);
   else if (!any && spreadTimer) { clearInterval(spreadTimer); spreadTimer = null; }
 }

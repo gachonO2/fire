@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { activeFloorPlan, currentHazards } from '../floor.js';
 import { getRepo } from '../repositories/index.js';
 import { requireAdmin } from '../middleware/auth.js';
+import { tick as heatTick } from '../heatSensors.js';
 
 export const hazardRoutes = Router();
 
@@ -56,6 +57,11 @@ hazardRoutes.post('/hazards/reset', requireAdmin, async (req, res) => {
   const repo = await getRepo();
   await repo.resetHazards();
   await repo.clearSensors();
+  // **감지기는 초기화 대상이 아니다.** 지우는 것은 «불이 났다는 판독값» 이지
+  // 건물에 달린 감지기가 아니다. 여기서 바로 다시 재지 않으면 다음 주기까지
+  // 관제에 감지기가 0대로 보이고, 시연 도중 초기화를 누른 사람은 그 사이에
+  // 「감지기가 사라졌다」 를 보게 된다.
+  await heatTick().catch(() => {});
   res.json({ ok: true, hazards: await currentHazards() });
 });
 

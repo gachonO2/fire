@@ -231,7 +231,7 @@ export function renderMap(svg, state = {}) {
     // 온도 판독값 배지
     const reading = sensorByEdge.get(edge.id);
     if (reading) {
-      tempBadge(el, mx, my + s * 1.1, reading, s);
+      tempBadge(el, mx, my + s * 1.1 * labelScale, reading, s, labelScale);
     }
   }
 
@@ -274,7 +274,7 @@ export function renderMap(svg, state = {}) {
     }
 
     const reading = sensorByNode.get(node.id);
-    if (reading) tempBadge(el, node.x, node.y + s * 1.6, reading, s);
+    if (reading) tempBadge(el, node.x, node.y + s * 1.6 * labelScale, reading, s, labelScale);
   }
 
   // 관제 사진 시나리오 — 앱에서도 불·현재 위치·탈출선을 같은 좌표로 그린다.
@@ -360,15 +360,23 @@ function label(el, x, y, text, { size, fill, weight = 400, bounds = null }) {
   return t;
 }
 
-function tempBadge(el, x, y, reading, s) {
+/**
+ * 온도 판독값 배지.
+ *
+ * **배율을 이름표와 같이 받는다.** 폰은 도면을 손바닥만 하게 띄우므로 큼직해야
+ * 읽히지만, 관제는 도면을 화면 전체로 띄운다. 같은 크기로 그렸더니 감지기
+ * 여섯 개의 «23°C» 가 도면을 덮어 정작 어느 방이 타는지가 안 보였다.
+ */
+function tempBadge(el, x, y, reading, s, scale = 1) {
+  const u = s * scale;
   const color = temperatureColor(reading.celsius);
   const text = `${Math.round(reading.celsius)}°C${reading.stale ? ' ⚠' : ''}`;
   el('rect', {
-    x: x - s * 1.4, y: y - s * 0.7, width: s * 2.8, height: s * 1.25, rx: s * 0.35,
+    x: x - u * 1.4, y: y - u * 0.7, width: u * 2.8, height: u * 1.25, rx: u * 0.35,
     fill: color, opacity: reading.stale ? 0.4 : 0.92, 'pointer-events': 'none',
   });
   const t = el('text', {
-    x, y: y + s * 0.22, 'text-anchor': 'middle', 'font-size': s * 0.82,
+    x, y: y + u * 0.22, 'text-anchor': 'middle', 'font-size': u * 0.82,
     fill: '#1a1a1a', 'font-weight': 700, 'pointer-events': 'none',
   });
   t.textContent = text;

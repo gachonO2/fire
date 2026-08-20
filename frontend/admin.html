@@ -363,7 +363,7 @@
     }
     .ops-body[data-floor="raw"] .map-stack #admin-map image { opacity: .55; }
     .map-stack #corridor-layer, .map-stack #room-layer, .map-stack #route-layer,
-    .map-stack #hazard-layer, .map-stack #photo-scenario-layer,
+    .map-stack #hazard-layer, .map-stack #sensor-layer, .map-stack #photo-scenario-layer,
     .map-stack #beacon-waves, .map-stack #live-layer, .map-stack #pick-layer {
       position: absolute; inset: 0; pointer-events: none;
     }
@@ -778,6 +778,9 @@
           <!-- 불·연기는 경로 위, 사람 아래. 경로가 불 밑에 깔리면 «불을 통과하는
                길» 처럼 보이고, 사람이 불 밑에 깔리면 누가 갇혔는지 안 보인다. -->
           <svg id="hazard-layer" aria-hidden="true"></svg>
+          <!-- 열감지기 판독값은 **불 위에** 온다. 불 밑에 깔면 정작 제일 중요한
+               숫자(«감지기가 207℃ 를 읽었다»)가 불꽃에 묻혀 안 보인다. -->
+          <svg id="sensor-layer" aria-hidden="true"></svg>
           <svg id="photo-scenario-layer" aria-hidden="true"></svg>
           <svg id="beacon-waves" aria-hidden="true"></svg>
           <svg id="live-layer" aria-hidden="true"></svg>

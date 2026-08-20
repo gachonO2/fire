@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { TEMP, temperatureHazard, isStale, HAZARD_RULES } from '../../../shared/hazard-rules.js';
+import { tick as heatTick } from '../heatSensors.js';
 import { activeFloorPlan } from '../floor.js';
 import { getRepo } from '../repositories/index.js';
 
@@ -47,6 +48,18 @@ sensorRoutes.post('/sensors/temperature', async (req, res) => {
 });
 
 /** 현재 판독값 목록 — 관제 모니터용. 오래된 값은 stale로 표시한다. */
+/**
+ * 감지기를 **지금 당장** 한 번 재게 한다.
+ *
+ * 평소에는 12초마다 스스로 잰다. 그런데 시연에서는 불을 넣고 «감지기가
+ * 반응하는가» 를 보여 줘야 하는데, 발표 중 12초는 길다. 이 경로는 그 주기를
+ * 기다리지 않고 한 바퀴 돌린다 — 값을 조작하는 것이 아니라 **재는 시점만**
+ * 앞당기는 것이라, 나오는 온도는 주기가 돌았을 때와 똑같다.
+ */
+sensorRoutes.post('/demo/heat-tick', async (req, res) => {
+  res.json({ ok: true, readings: await heatTick() });
+});
+
 sensorRoutes.get('/sensors', async (req, res) => {
   const repo = await getRepo();
   const now = Date.now();

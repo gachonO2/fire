@@ -43,6 +43,12 @@ export const SPREAD = Object.freeze({
   smoke: { r0: 3.4, rMax: 22, tauMs: 45_000 },   // 더 크고 더 빠르다
   crowd: { r0: 6.0, rMax: 6.5, tauMs: 60_000 },  // 사실상 안 번진다
   temp:  { r0: 3.0, rMax: 8, tauMs: 90_000 },
+  // 감지기가 만든 위험. 화면에서는 덩어리로 안 그리지만(불이 이미 그 자리를
+  // 말한다), 값을 물으면 답할 수 있어야 한다 — 없으면 «불» 로 되돌아가
+  // 엉뚱한 색과 이름이 나온다.
+  heat:  { r0: 3.0, rMax: 8, tauMs: 90_000 },
+  warm:  { r0: 2.5, rMax: 6, tauMs: 90_000 },
+  blocked: { r0: 3.0, rMax: 4, tauMs: 1 },
   clear: { r0: 0, rMax: 0, tauMs: 1 },
 });
 
