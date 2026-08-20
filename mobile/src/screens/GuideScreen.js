@@ -38,6 +38,7 @@ import { Barometer, Magnetometer } from 'expo-sensors';
 
 import { BearingSensor, alignment, proximity, ALIGNED_DEG } from '../bearing';
 import { Tracking } from '../tracking';
+import { DESCENT_PHASE, StairDescent, floorOf } from '../stair-descent';
 import { WalkSim } from '../walk-sim';
 import { scanBeacons } from '../beaconLocator';
 import { withVirtualBeacons } from '../beaconSim';
@@ -117,7 +118,12 @@ export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
   // 지도는 **동행하는 사람과 만드는 사람**을 위한 것이다. 화살표 하나로는
   // "위치가 맞게 잡히고 있나"를 확인할 수 없고, 확인이 안 되면 측위가 되는지 모른다.
   const [showMap, setShowMap] = useState(true);
+  // **비상구에 닿는 것은 도착이 아니다.** 6층 계단참에 서 있는 것은 안전한
+  // 상태가 아니고(계단실은 연기가 굴뚝처럼 오른다), 진짜 대피는 건물 밖까지다.
+  // `arrived` 는 이제 «계단 앞에 닿았다» 를 뜻하고, 끝은 `descent.done` 이다.
   const [arrived, setArrived] = useState(false);
+  const [descentState, setDescentState] = useState(null);
+  const descent = useRef(null);
   const [stopped, setStopped] = useState(false);
   const [info, setInfo] = useState(null);
   const [scenarioPosition, setScenarioPosition] = useState(null);
@@ -127,6 +133,8 @@ export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
   const odo = useRef(new Odometry()).current;
   // 기기마다 하나. 새로고침해도 안 바뀐다 — 바뀌면 관제에 유령이 하나씩 쌓인다.
   const userId = useRef(deviceIdNow());
+  /** 기압계가 있나 — 없으면 층수를 세지 않고 그 사실을 말한다 */
+  const baroOk = useRef(true);
   const followerOptions = wallSet => ({
     walls: wallSet,
     path: scenario?.route ?? null,
@@ -261,17 +269,29 @@ export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
     // 기압계 — 층이 바뀌면 엘리베이터·계단 노드가 공짜 앵커가 된다
     let baroSub = null;
     Barometer.isAvailableAsync().then(ok => {
+      baroOk.current = !!ok;
       if (!ok || !alive) return;
       Barometer.setUpdateInterval(1000);
       baroSub = Barometer.addListener(({ pressure }) => {
         const change = tracking.pushPressure(pressure, Date.now());
-        if (change) {
-          // 층이 바뀌면 **도면도 바뀌어야 한다.** 지금 도면 모델은 한 층짜리라
-          // 여기서는 알리기만 한다(다음 단계에서 도면 교체를 붙인다).
-          speak(change.kind === 'elevator'
-            ? `엘리베이터로 ${Math.abs(change.floors)}개 층 이동했습니다.`
-            : `계단으로 ${Math.abs(change.floors)}개 층 이동했습니다.`);
+        if (!change) return;
+        // **계단을 내려가는 중이면 그쪽이 임자다.** 「몇 개 층 이동했습니다」
+        // 는 층을 세 주지 않아서, 듣는 사람이 지금 몇 층인지 모른다. 대피
+        // 중에 알아야 하는 것은 이동량이 아니라 **남은 층수**다.
+        if (descent.current && !descent.current.done) {
+          const r = descent.current.push(change);
+          setDescentState(r);
+          if (r.say) {
+            if (r.alarm) chimeWrong();
+            speak(r.say);
+          }
+          return;
         }
+        // 대피 전(층을 옮겨 다니는 중)에는 알리기만 한다. 도면 모델이 한
+        // 층짜리라 도면 교체는 아직 못 한다.
+        speak(change.kind === 'elevator'
+          ? `엘리베이터로 ${Math.abs(change.floors)}개 층 이동했습니다.`
+          : `계단으로 ${Math.abs(change.floors)}개 층 이동했습니다.`);
       });
     }).catch(() => {});
 
@@ -499,7 +519,13 @@ export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
     api?.updatePosition?.(userId.current, {
       nodeId: pos?.fromNodeId ?? startNode?.id ?? null,
       nodeName: d.targetName,
-      phase: phase || (arrived ? 'arrived' : halted.current ? 'safehold' : 'guiding'),
+      // 계단 앞은 «대피 완료» 가 아니다. 밖으로 나와야 arrived 다 —
+      // 관제의 «대피 완료» 숫자가 계단참에 서 있는 사람을 세면,
+      // 구조대가 아직 건물 안에 있는 사람을 뺀 채로 판단하게 된다.
+      phase: phase
+        || (descent.current?.done ? 'arrived'
+          : arrived ? 'stairs'
+            : halted.current ? 'safehold' : 'guiding'),
       x: pos?.x, y: pos?.y,
       edgeId: pos?.edgeId ?? null,
       progress: pos?.progress ?? 0,
@@ -654,12 +680,42 @@ export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
     announceSegment(true);
   }
 
+  /**
+   * 비상구에 닿았다 — **여기서 「대피 완료」 라고 말하지 않는다.**
+   *
+   * 눈이 보이는 사람에게는 이 뒤가 문제가 안 된다. 계단이 보이고, 층 번호가
+   * 벽에 적혀 있고, 1층에 닿으면 출입문이 보인다. **셋 다 시각 정보다.**
+   * 시각장애인에게는 하나도 안 오므로, 이 구간이야말로 이 앱이 필요한 곳이다.
+   */
   function finish() {
     setArrived(true);
     haptic.setStrength(0);
     haptic.stop();
     chimeGood();
-    speak(`${followerRef.current.describe().exitName}에 도착했습니다. 계단으로 내려가세요.`);
+    const exitName = followerRef.current.describe().exitName || '비상구';
+    const d = new StairDescent(floorOf(plan?.name), { hasBarometer: baroOk.current });
+    descent.current = d;
+    const r = d.reachExit(exitName);
+    setDescentState(r);
+    speak(r.say);
+  }
+
+  /** 계단을 다 내려와 밖으로 나왔다 — **여기서만 대피 완료다.** */
+  function markOut() {
+    if (!descent.current) return;
+    const r = descent.current.markOut();
+    setDescentState(r);
+    chimeGood();
+    speak(r.say);
+    report({ phase: 'arrived' }).catch(() => {});
+  }
+
+  /** 기압계가 없는 폰에서 사람이 «다 내려왔다» 고 알린다 */
+  function markGround() {
+    if (!descent.current) return;
+    const r = descent.current.markGround();
+    setDescentState(r);
+    speak(r.say);
   }
 
   /**
@@ -706,7 +762,10 @@ export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
   const good = align >= 0.92 && !blocked && !stopped;
   const dim = blocked || stopped;
 
-  const side = arrived ? '도착했습니다'
+  const dPhase = descentState?.phase;
+  const side = descent.current?.done ? '대피 완료입니다'
+    : dPhase === DESCENT_PHASE.GROUND ? '건물 밖으로 나가세요'
+    : arrived ? '계단으로 내려가세요'
     : stopped ? '그 자리에서 도움을 요청하세요'
     : blocked || err === null ? '방향 확인 중'
     : Math.abs(err) <= ALIGNED_DEG ? '정면'
@@ -755,13 +814,24 @@ export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
         accessible
         accessibilityLiveRegion="polite"
         accessibilityLabel={
-          arrived ? `${info?.exitName || '출구'}에 도착했습니다`
-            : `${fmt(info?.metersLeft ?? 0)}미터, ${side}`
+          descent.current?.done ? '대피 완료입니다. 안전한 곳입니다'
+            : arrived
+              ? (Number.isFinite(descentState?.floorsLeft) && descentState.floorsLeft > 0
+                ? `${descentState.floor}층입니다. ${descentState.floorsLeft}개 층 남았습니다`
+                : side)
+              : `${fmt(info?.metersLeft ?? 0)}미터, ${side}`
         }
       >
         <Text style={[styles.distance, good && styles.distanceGood]}>
-          {arrived ? '도착' : fmt(info?.metersLeft ?? 0)}
-          {!arrived && <Text style={styles.unit}>m</Text>}
+          {descent.current?.done ? '완료'
+            : arrived
+              ? (Number.isFinite(descentState?.floorsLeft) && descentState.floorsLeft > 0
+                ? descentState.floorsLeft : '계단')
+              : fmt(info?.metersLeft ?? 0)}
+          {arrived
+            ? (Number.isFinite(descentState?.floorsLeft) && descentState.floorsLeft > 0
+              ? <Text style={styles.unit}>개 층</Text> : null)
+            : <Text style={styles.unit}>m</Text>}
         </Text>
         <Text style={styles.side}>{side}</Text>
         {info && !arrived && (
@@ -788,6 +858,28 @@ export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
             mapped={mapped}
           />
         </View>
+      )}
+
+      {/* 계단 구간 — **여기서만 나오는 큰 버튼 하나.**
+
+          기계가 층을 못 세는 폰이 있고(기압계 없음), 셀 수 있어도 «밖으로
+          나왔다» 는 기압으로 알 수 없다. 그 마지막 한 걸음은 사람이 알려
+          줘야 하고, 그래야 관제의 «대피 완료» 숫자가 진실이 된다.
+
+          버튼이 크고 하나뿐인 이유: 이 순간 사용자는 계단을 내려온 직후라
+          숨이 차고, 화면을 볼 형편이 아니다. 더듬어 눌러도 맞아야 한다. */}
+      {arrived && !descent.current?.done && (
+        <Pressable
+          style={styles.descentBtn}
+          onPress={dPhase === DESCENT_PHASE.GROUND ? markOut : markGround}
+          accessibilityRole="button"
+          accessibilityLabel={dPhase === DESCENT_PHASE.GROUND
+            ? '건물 밖으로 나왔습니다. 누르면 대피 완료로 기록합니다'
+            : '1층에 도착했습니다. 층이 자동으로 세어지지 않을 때 누르세요'}>
+          <Text style={styles.descentBtnText}>
+            {dPhase === DESCENT_PHASE.GROUND ? '밖으로 나왔습니다' : '1층에 도착했습니다'}
+          </Text>
+        </Pressable>
       )}
 
       {/* 버튼은 눈이 보이는 사람용. 시각장애인은 화면 아무 데나 누르면 다시 듣는다. */}
@@ -856,6 +948,13 @@ const styles = StyleSheet.create({
   dest: { color: '#5a5a5f', fontSize: 15, marginTop: 6 },
 
   controls: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 18 },
+  // 계단을 내려온 직후에 누르는 버튼이라 크고 하나뿐이다 — 숨이 차고
+  // 화면을 볼 형편이 아닌 사람이 더듬어 눌러도 맞아야 한다.
+  descentBtn: {
+    marginTop: 16, paddingVertical: 22, borderRadius: 16,
+    alignItems: 'center', backgroundColor: theme.ok,
+  },
+  descentBtnText: { color: '#04121f', fontSize: 20, fontWeight: '800' },
   circle: {
     width: 62, height: 62, borderRadius: 31, backgroundColor: '#1c1c1e',
     alignItems: 'center', justifyContent: 'center',

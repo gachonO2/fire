@@ -292,7 +292,9 @@ function draw() {
 function updateStats() {
   const blocked = Object.keys(hazards || {}).length;
   const alive = livePositions();
-  const walking = alive.filter(p => p.phase === 'guiding').length;
+  // 계단을 내려가는 사람도 **아직 건물 안이다.** 이 숫자에서 빼면
+  // 관제가 «다 나갔다» 로 읽는다.
+  const walking = alive.filter(p => p.phase === 'guiding' || p.phase === 'stairs').length;
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
   set('stat-people', walking);
   set('stat-hazards', blocked);
@@ -732,6 +734,10 @@ function syncPhotoScenarioButton() {
 
 const PHASE = {
   guiding:  { label: '대피 중',   cls: 'accent' },
+  // **계단은 아직 건물 안이다.** 「대피 완료」 로 세면 구조대가 계단참에
+  // 서 있는 사람을 뺀 채로 판단한다 — 계단실은 연기가 굴뚝처럼 오르는 곳이라
+  // 거기 있는 사람이야말로 아직 위험하다.
+  stairs:   { label: '계단 하강', cls: 'accent' },
   arrived:  { label: '대피 완료', cls: 'on' },
   safehold: { label: '안전 대기', cls: 'bad' },
   idle:     { label: '대기',      cls: '' },
@@ -849,7 +855,7 @@ function renderSummary() {
   if (!box || selectedUser) return;
 
   const alive = livePositions();
-  const guiding = alive.filter(p => p.phase === 'guiding').length;
+  const guiding = alive.filter(p => p.phase === 'guiding' || p.phase === 'stairs').length;
   const held = alive.filter(p => p.phase === 'safehold').length;
   const survey = alive.filter(p => p.phase === 'survey').length;
   const byBeacon = alive.filter(p => p.source === 'beacon' && !isStale(p)).length;

@@ -46,6 +46,7 @@ const FILES = [
   'wall-route.js',      // 벽을 피해 가는 길 — 안내와 그림이 같은 함수를 쓴다
   'ble-decode.js',      // BLE 광고 → 비콘 이름. 맥 스캐너와 같은 규칙
   'photo-scenario.js',  // 관제 사진 시나리오 — 앱 지도도 같은 위치·경로를 쓴다
+  'stair-descent.js',   // 비상계단 하강 — 비상구는 도착이 아니라 반환점이다
 ];
 
 try {
