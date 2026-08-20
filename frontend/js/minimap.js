@@ -49,6 +49,8 @@ export function renderMap(svg, state = {}) {
     hazards = {}, route = null, userPos = null, positions = [], scenario = null,
     sensors = [], backgroundImage = null,
     onEdgeClick = null, onNodeClick = null, highlightEdgeId = null,
+    // 통로도 지점도 아닌 곳을 눌렀을 때 도면 좌표를 준다.
+    onBlankClick = null,
     // 관제는 도면을 화면 전체로 띄운다. 지점 이름이 도면 폭의 1/40 이면
     // 43개가 서로 덮어써서 아무것도 안 읽힌다. 폰은 도면을 손바닥만 하게
     // 띄우므로 같은 값이 맞다 — 그래서 크기를 화면 쪽에서 정하게 열어 둔다.
@@ -96,6 +98,41 @@ export function renderMap(svg, state = {}) {
     height = Math.max(...ys) + PAD - minY;
   }
   svg.setAttribute('viewBox', `${minX} ${minY} ${width} ${height}`);
+
+  // **빈 곳 클릭 — 도면 좌표로 바꿔 넘긴다.**
+  //
+  // 이게 없으면 화재 도구가 사실상 안 먹는다. 통로는 몇 픽셀짜리 선이고
+  // 그 위에만 클릭이 붙어 있어서, 방 한가운데나 도면 사진을 누르면 아무
+  // 일도 일어나지 않는다. 관제에서 «불을 여기 놓겠다» 는 방을 가리키는
+  // 동작이지 선을 겨누는 동작이 아니다.
+  //
+  // 통로·지점 핸들러가 `stopPropagation()` 을 하므로, 루트에 붙인 이것은
+  // **진짜 빈 곳일 때만** 불린다.
+  //
+  // 좌표 변환에 `getScreenCTM()` 을 쓴다. 관제는 판을 CSS 3D 로 눕혀 놓아서
+  // 화면 좌표와 도면 좌표가 회전·원근만큼 어긋나는데, 이 행렬은 조상의
+  // 변형까지 반영한 «지금 화면에 그려진 그대로» 를 준다. 원근이 섞이면
+  // 완전히 정확하진 않지만(실측 오차 수 px), 받는 쪽이 어차피 가장 가까운
+  // 통로로 붙이므로 그 정도면 충분하다.
+  //
+  // `renderMap` 은 상태가 바뀔 때마다 다시 불린다. 그때마다 리스너를 새로
+  // 붙이면 한 번의 클릭이 수십 번 처리되므로, **핸들러는 한 번만 달고**
+  // 최신 콜백은 요소에 얹어 두고 꺼내 쓴다.
+  svg.__onBlankClick = onBlankClick;
+  if (onBlankClick && !svg.__blankClickWired) {
+    svg.__blankClickWired = true;
+    svg.style.pointerEvents = 'auto';
+    svg.addEventListener('click', ev => {
+      const fn = svg.__onBlankClick;
+      if (!fn) return;
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return;
+      const p = svg.createSVGPoint();
+      p.x = ev.clientX; p.y = ev.clientY;
+      const { x, y } = p.matrixTransform(ctm.inverse());
+      if (Number.isFinite(x) && Number.isFinite(y)) fn(x, y);
+    });
+  }
 
   // 도면 크기에 비례한 선 굵기·글자 크기 (픽셀 좌표계면 값이 커지므로 정규화한다)
   const s = Math.max(width, height) / 40;
@@ -145,10 +182,18 @@ export function renderMap(svg, state = {}) {
         points: pts, fill: 'none',
         stroke: hazard ? hazardStyle(hazard.type).color
           : onRoute ? 'var(--route, #30a46c)' : 'var(--corridor, #c8c8ce)',
-        'stroke-width': (onRoute ? 1.6 : hazard ? 1.3 : 1.0) * s * 0.55,
+        // 위험한 통로는 **가늘게** 긋는다.
+        //
+        // 예전에는 제일 굵고(1.3배) 큼직한 점선이라, 둥근 끝과 겹쳐 «빨간
+        // 구슬 목걸이» 가 됐다. 관제 화면에서 그게 제일 눈에 띄는 물체였는데
+        // 정작 뜻은 «이 구간이 막혔다» 뿐이다. 불이 어디서 얼마나 번지는지는
+        // 위험 레이어(`admin.js drawHazards`)의 덩어리가 말한다. 선은 그
+        // 덩어리를 **어느 구간까지 끊어 놓았나** 로만 남는다.
+        'stroke-width': (onRoute ? 1.6 : hazard ? 0.5 : 1.0) * s * 0.55,
+        'stroke-opacity': hazard && !onRoute ? 0.8 : 1,
         'stroke-linecap': 'round',
         'stroke-linejoin': 'round',
-        'stroke-dasharray': hazard ? `${s * 0.7} ${s * 0.7}` : 'none',
+        'stroke-dasharray': hazard ? `${s * 0.5} ${s * 0.85}` : 'none',
         'pointer-events': 'none',
       });
     }
