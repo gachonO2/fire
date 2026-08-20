@@ -1,0 +1,782 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="피난안내도 기호 탐지 YOLO 모델의 학습 데이터·클래스별 지표·실제 사진 탐지 결과.">
+<title>피난안내도 기호 탐지 모델</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;800&family=IBM+Plex+Sans+KR:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --ground: #F1F4F1;
+    --surface: #FFFFFF;
+    --panel: #E5EBE6;
+    --line: #CFD9D2;
+    --ink: #101A15;
+    --muted: #5B6A62;
+    --accent: #0E7A4C;
+    --accent-soft: #D7EBE0;
+    --alert: #BE3A2E;
+    --alert-soft: #F6DFDC;
+    --amber: #9A6408;
+    --amber-soft: #F5E7CC;
+    --shadow: 0 1px 2px rgba(16, 26, 21, .06), 0 8px 24px rgba(16, 26, 21, .05);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0C1310;
+      --surface: #151E19;
+      --panel: #1C2721;
+      --line: #2B3A32;
+      --ink: #E3ECE6;
+      --muted: #93A49B;
+      --accent: #45C489;
+      --accent-soft: #17342A;
+      --alert: #F0766A;
+      --alert-soft: #3A1E1B;
+      --amber: #D9A44A;
+      --amber-soft: #342813;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .28);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0C1310;
+    --surface: #151E19;
+    --panel: #1C2721;
+    --line: #2B3A32;
+    --ink: #E3ECE6;
+    --muted: #93A49B;
+    --accent: #45C489;
+    --accent-soft: #17342A;
+    --alert: #F0766A;
+    --alert-soft: #3A1E1B;
+    --amber: #D9A44A;
+    --amber-soft: #342813;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .28);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans KR", system-ui, -apple-system, "Malgun Gothic", sans-serif;
+    font-weight: 400;
+    font-size: 16px;
+    line-height: 1.72;
+    -webkit-font-smoothing: antialiased;
+    word-break: keep-all;
+  }
+
+  .wrap {
+    max-width: 66rem;
+    margin: 0 auto;
+    padding: 0 1.5rem 6rem;
+  }
+
+  h1, h2, h3 {
+    font-family: "Gothic A1", "IBM Plex Sans KR", sans-serif;
+    text-wrap: balance;
+    margin: 0;
+    letter-spacing: -.01em;
+  }
+
+  .mono {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------------------------------------------------------- 머리 */
+
+  header.masthead {
+    padding: 4.5rem 0 2.5rem;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .74rem;
+    font-weight: 500;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: .7rem;
+  }
+
+  .eyebrow::before {
+    content: "";
+    width: 1.6rem;
+    height: 2px;
+    background: var(--accent);
+    flex: none;
+  }
+
+  h1 {
+    font-size: clamp(2.3rem, 6vw, 3.6rem);
+    font-weight: 800;
+    line-height: 1.12;
+    margin: 1.1rem 0 0;
+  }
+
+  .lede {
+    font-size: clamp(1.02rem, 2.2vw, 1.18rem);
+    color: var(--muted);
+    max-width: 46ch;
+    margin: 1.1rem 0 0;
+    font-weight: 300;
+  }
+
+  .stamp {
+    margin-top: 2rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem 1.4rem;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .78rem;
+    color: var(--muted);
+  }
+
+  /* ---------------------------------------------------------- 수치 */
+
+  .kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    margin: 0 0 3.5rem;
+  }
+
+  .kpi {
+    background: var(--surface);
+    padding: 1.4rem 1.2rem 1.3rem;
+  }
+
+  .kpi b {
+    display: block;
+    font-family: "IBM Plex Mono", monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 2.05rem;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -.03em;
+  }
+
+  .kpi span {
+    display: block;
+    margin-top: .55rem;
+    font-size: .8rem;
+    color: var(--muted);
+    line-height: 1.45;
+  }
+
+  .kpi small {
+    display: block;
+    font-size: .72rem;
+    color: var(--muted);
+    opacity: .8;
+  }
+
+  /* ---------------------------------------------------------- 절 */
+
+  section { padding-top: 3.6rem; }
+
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    border-top: 1px solid var(--line);
+    padding-top: 1.1rem;
+    margin-bottom: 1.4rem;
+  }
+
+  .sec-head .tag {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .72rem;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    flex: none;
+    padding-top: .35rem;
+  }
+
+  h2 {
+    font-size: clamp(1.5rem, 3.4vw, 1.95rem);
+    font-weight: 700;
+  }
+
+  h3 {
+    font-size: 1.06rem;
+    font-weight: 700;
+    margin: 2.2rem 0 .6rem;
+  }
+
+  p { margin: 0 0 1rem; max-width: 68ch; }
+
+  .note {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    padding: .9rem 1.1rem;
+    margin: 1.4rem 0;
+    font-size: .92rem;
+    line-height: 1.65;
+  }
+
+  .note.warn {
+    border-left-color: var(--alert);
+    background: var(--alert-soft);
+  }
+
+  .note p:last-child { margin-bottom: 0; }
+  .note strong { font-weight: 600; }
+
+  /* ---------------------------------------------------------- 표 */
+
+  .scroller {
+    overflow-x: auto;
+    margin: 1.4rem 0;
+    border: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 34rem;
+    font-size: .88rem;
+  }
+
+  th, td {
+    text-align: left;
+    padding: .62rem .9rem;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+
+  thead th {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .7rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    background: var(--panel);
+  }
+
+  tbody tr:last-child td { border-bottom: none; }
+
+  td.num, th.num {
+    text-align: right;
+    font-family: "IBM Plex Mono", monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  td.wrap-cell { white-space: normal; min-width: 16rem; }
+
+  .pill {
+    display: inline-block;
+    padding: .06rem .5rem;
+    border-radius: 999px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .72rem;
+    font-weight: 500;
+    border: 1px solid transparent;
+  }
+
+  .pill.ok { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+  .pill.mid { background: var(--amber-soft); color: var(--amber); border-color: var(--amber); }
+  .pill.model { background: var(--panel); color: var(--muted); border-color: var(--line); }
+
+  /* ---------------------------------------------------------- 막대 */
+
+  .bars {
+    display: grid;
+    grid-template-columns: 7.5rem 1fr 3.6rem;
+    align-items: center;
+    gap: .45rem .8rem;
+    margin: 1.4rem 0 .9rem;
+  }
+
+  .bars .name { font-size: .86rem; }
+
+  .bars .name em {
+    font-style: normal;
+    color: var(--muted);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .72rem;
+    display: block;
+    line-height: 1.2;
+  }
+
+  .track {
+    height: .72rem;
+    background: var(--panel);
+    position: relative;
+  }
+
+  .track i {
+    position: absolute;
+    inset: 0 auto 0 0;
+    display: block;
+  }
+
+  .bars .val {
+    text-align: right;
+    font-family: "IBM Plex Mono", monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: .82rem;
+    color: var(--muted);
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem 1.2rem;
+    font-size: .78rem;
+    color: var(--muted);
+  }
+
+  .legend span { display: flex; align-items: center; gap: .4rem; }
+  .legend i { width: .8rem; height: .8rem; display: block; }
+
+  /* ---------------------------------------------------------- 그림 */
+
+  figure {
+    margin: 1.8rem 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow);
+  }
+
+  figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  figcaption {
+    padding: .8rem 1rem;
+    border-top: 1px solid var(--line);
+    font-size: .82rem;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+
+  figcaption b {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  .pair {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+    gap: 1.2rem;
+    margin: 1.8rem 0;
+  }
+
+  .pair figure { margin: 0; }
+
+  .badge-row {
+    display: flex;
+    gap: .5rem;
+    padding: .7rem 1rem 0;
+    flex-wrap: wrap;
+  }
+
+  .badge {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .7rem;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    padding: .1rem .55rem;
+    border: 1px solid var(--line);
+    color: var(--muted);
+  }
+
+  .badge.before { border-color: var(--alert); color: var(--alert); }
+  .badge.after { border-color: var(--accent); color: var(--accent); }
+
+  /* ---------------------------------------------------------- 단계 */
+
+  .stages {
+    display: grid;
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    margin: 1.6rem 0;
+  }
+
+  .stage {
+    background: var(--surface);
+    display: grid;
+    grid-template-columns: 3.2rem 1fr;
+    gap: 1.1rem;
+    padding: 1.2rem 1.2rem;
+  }
+
+  .stage .idx {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .78rem;
+    font-weight: 600;
+    color: var(--accent);
+    border-right: 1px solid var(--line);
+    padding-right: .8rem;
+  }
+
+  .stage h4 {
+    margin: 0 0 .35rem;
+    font-family: "Gothic A1", sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+  }
+
+  .stage p { margin: 0; font-size: .9rem; color: var(--muted); max-width: 62ch; }
+
+  .stage code {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .8rem;
+    background: var(--panel);
+    padding: .05rem .35rem;
+    color: var(--ink);
+  }
+
+  ul.tight {
+    margin: .6rem 0 1.2rem;
+    padding-left: 1.1rem;
+    max-width: 68ch;
+  }
+
+  ul.tight li { margin-bottom: .35rem; }
+
+  code {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: .86em;
+    background: var(--panel);
+    padding: .06rem .34rem;
+  }
+
+  footer {
+    margin-top: 4rem;
+    border-top: 1px solid var(--line);
+    padding-top: 1.4rem;
+    font-size: .8rem;
+    color: var(--muted);
+  }
+
+  footer ul { padding-left: 1.1rem; margin: .6rem 0 0; }
+
+  @media (max-width: 560px) {
+    .bars { grid-template-columns: 6rem 1fr 3rem; }
+    .stage { grid-template-columns: 1fr; gap: .5rem; }
+    .stage .idx { border-right: none; border-bottom: 1px solid var(--line); padding: 0 0 .4rem; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">시각장애인 대피 내비게이션 · 도면 판독 AI</div>
+    <h1>피난안내도 기호 탐지 모델</h1>
+    <p class="lede">벽에 걸린 피난안내도 사진 한 장에서 비상구·계단·소화기를 찾아, 대피 경로 그래프의 좌표로 옮겨 적는 YOLO 탐지기. 학습 데이터, 검증 지표, 실제 사진에서의 거동을 모았다.</p>
+    <div class="stamp">
+      <span>YOLO11n · 8 클래스</span>
+      <span>합성 100장 사전학습 → 실촬 이어학습</span>
+      <span>측정일 2026-08-20</span>
+    </div>
+  </header>
+
+  <div class="kpis" style="margin-top:2.5rem">
+    <div class="kpi"><b>8</b><span>탐지 클래스<small>비상구·계단·승강기·소화기·소화전·현위치·문·실</small></span></div>
+    <div class="kpi"><b>3,142</b><span>학습 라벨 상자<small>합성 도면 100장 · 장당 31개</small></span></div>
+    <div class="kpi"><b>1.000</b><span>검증 재현율 (8클래스 중 6)<small>나머지 2개도 0.991</small></span></div>
+    <div class="kpi"><b>1.5초</b><span>사진 한 장 추론<small>CPU · 1280px · 모델 2벌 합산</small></span></div>
+  </div>
+
+  <!-- ============================================ 왜 -->
+  <section>
+    <div class="sec-head"><span class="tag">문제</span><h2>왜 탐지기를 학습시켰나</h2></div>
+
+    <p>피난안내도에는 비상구도, 현 위치도, 피난경로 화살표도 <strong>이미 그려져 있다.</strong> 도면 등록은 없던 정보를 만드는 작업이 아니라, 그림으로만 있는 것을 좌표로 <strong>옮겨 적는</strong> 작업이다. 그런데 지금까지는 사람이 편집기에서 한 층에 20~30번을 클릭해 지점을 찍었고, 건물이 바뀌면 처음부터 다시 했다.</p>
+
+    <p>그 옮겨 적기를 모델에게 시킨다. 다만 좌표만이다 — 이름과 통로 연결은 언어모델이, 최종 확인은 사람이 맡는다.</p>
+
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr><th>담당</th><th>하는 일</th><th class="wrap-cell">못 하는 것</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><span class="pill model">기호 탐지기</span></td><td>비상구·계단·실·문이 <b>어디 있는지</b></td><td class="wrap-cell">글자를 못 읽고, 통로 연결을 모른다</td></tr>
+          <tr><td><span class="pill model">언어모델</span></td><td>적힌 <b>이름</b>과 <b>통로 연결</b></td><td class="wrap-cell">좌표가 눈대중이라 수십 px 어긋난다</td></tr>
+          <tr><td><span class="pill model">사람</span></td><td>축척(m)과 최종 승인</td><td class="wrap-cell">— 건너뛸 수 없게 막아 두었다</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <p><strong>모델 결과는 저장되지 않는다.</strong> 편집기에 초안으로 올라올 뿐이고, 사람이 확인하고 저장을 눌러야 안내에 들어간다. 비상구를 하나 잘못 찍으면 시각장애인이 벽으로 걸어간다.</p>
+    </div>
+  </section>
+
+  <!-- ============================================ 데이터 -->
+  <section>
+    <div class="sec-head"><span class="tag">학습 데이터</span><h2>합성 도면 100장을 직접 그려서 만들었다</h2></div>
+
+    <p>도면을 <strong>먼저 그리고</strong> 그리는 순간의 좌표를 그대로 정답으로 적는 방식이라 라벨 오차가 0이다. 사전학습용으로는 이 성질이 중요하다 — 실제 사진 100장에 밑라벨을 깔아 줄 모델이 애매한 라벨로 배우면 밑라벨도 애매해지고, 사람이 고칠 것이 늘어난다.</p>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th>항목</th><th class="num">값</th><th>비고</th></tr></thead>
+        <tbody>
+          <tr><td>이미지</td><td class="num">100장</td><td>800×800 JPEG · 시드 20260814 고정</td></tr>
+          <tr><td>학습 / 검증 / 시험</td><td class="num">70 / 20 / 10</td><td>장 단위 분할</td></tr>
+          <tr><td>라벨 상자</td><td class="num">3,142개</td><td>장당 평균 31개</td></tr>
+          <tr><td>정답 대피 그래프</td><td class="num">100개</td><td>지점 25 · 통로 24 · 출구 2.6 (평균)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>클래스 분포와 크기</h3>
+    <p>문·실이 도면의 뼈대라 수가 압도적이고, 정작 대피에 결정적인 비상구는 303개다. 게다가 800px 도면에서 <strong>비상구 픽토그램은 평균 31×19px, 소화기는 18px</strong>이다 — 이 작은 크기가 뒤에 나올 추론 해상도 결정을 그대로 좌우한다.</p>
+
+    <div class="bars" id="bars"></div>
+    <div class="legend">
+      <span><i style="background:var(--accent)"></i>대피 목표 · 경유</span>
+      <span><i style="background:var(--alert)"></i>소방 설비</span>
+      <span><i style="background:var(--amber)"></i>출발점 단서</span>
+      <span><i style="background:var(--muted)"></i>도면 구조</span>
+    </div>
+
+    <h3>100장이 서로 다른 이유</h3>
+    <p>한 종류를 100번 그리면 100장이 아니라 1장이다. 네 축을 조합해 흩뜨렸다.</p>
+    <ul class="tight">
+      <li><b>복도 구조 8가지</b> — 일자(가로/세로), 十자, H, 격자(순환), 가로 3줄, 세로 3줄</li>
+      <li><b>건물 용도 5가지</b> — 병동 21 · 교사동 21 · 사무동 21 · 청사 19 · 상가 18 (실 이름 사전이 다르다)</li>
+      <li><b>도면 색 5가지</b> — 밝은 회색 24 · 흰 바탕 인쇄 24 · 누런 종이 16 · 청사진 16 · 기본색 20</li>
+      <li><b>촬영 흔적</b> — ±3.5° 기울기, 축소·이동, 한쪽에서 드는 빛, 비네팅, 초점 흐림, 센서 노이즈, JPEG 재압축</li>
+    </ul>
+
+    <figure>
+      <img src="figs/synthetic-samples.jpg" alt="합성 학습 도면 4장에 정답 라벨 상자를 겹쳐 그린 이미지">
+      <figcaption><b>학습 이미지와 정답 라벨.</b> 왼쪽 위부터 병동(밝은 회색) · 교사동(흰 바탕 인쇄) · 교사동(누런 종이) · 청사(청사진). 초록은 비상구, 주황·빨강은 소화기·소화전, 노랑은 현위치, 파랑은 계단, 보라는 승강기. 기울기·빛·비네팅은 생성 단계에서 입힌 것이다.</figcaption>
+    </figure>
+
+    <figure>
+      <img src="figs/label-zoom.jpg" alt="합성 도면의 일부를 3배 확대해 정답 라벨 상자를 보여주는 이미지">
+      <figcaption><b>라벨 확대 (3×).</b> 분홍은 실(room), 파랑은 출입문(door), 하늘색은 계단, 보라는 승강기, 빨강은 소화기. 문은 벽 위에, 실은 벽 안쪽에 붙는다 — 이 구분이 뒤에서 "복도가 어디인가"를 푸는 기준이 된다.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ============================================ 학습 -->
+  <section>
+    <div class="sec-head"><span class="tag">학습 절차</span><h2>합성으로 눈을 뜨고, 실촬로 현장에 맞춘다</h2></div>
+
+    <p>합성 도면은 배치와 기호 규칙까지는 실제와 같지만 종이 질감·유리 반사·형광등 빛·비스듬한 각도를 흉내내지 못한다. 그래서 1부만 돌린 모델은 실제 사진에서 성능이 떨어진다. <strong>1부는 2부의 라벨링 시간을 17시간에서 3시간으로 줄이기 위한 발판이다</strong> — 실제 100장을 맨손으로 라벨링하면 장당 30개씩 3,000개를 찍어야 하지만, 1부 모델이 밑라벨을 깔아 주면 사람은 틀린 것만 고친다.</p>
+
+    <div class="stages">
+      <div class="stage">
+        <div class="idx">1부</div>
+        <div>
+          <h4>합성 100장 사전학습</h4>
+          <p><code>yolo11n</code> · 150 에폭 · <code>imgsz=800</code> · <code>batch=8</code> · <code>patience=40</code> · 증강 <code>degrees=5.0</code> <code>translate=0.08</code> <code>scale=0.35</code> <code>mosaic=0.7</code> <code>close_mosaic=20</code>. 좌우·상하 뒤집기는 <b>껐다</b> — 도면을 뒤집으면 글자가 거울상이 되어 실제로는 없는 그림을 배운다. T4 기준 20~30분.</p>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="idx">2부</div>
+        <div>
+          <h4>실제 피난안내도 이어학습</h4>
+          <p>같은 안내도를 각도·거리·조명을 바꿔 3~4장씩 찍어 모은다(유리 반사가 든 사진도 일부러 남긴다). 1부 모델로 밑라벨을 깔고 사람이 검수한 뒤, 1부 가중치에서 출발해 <code>lr0=0.002</code> · 60 에폭. <b>점수는 실제 사진만 모은 검증 목록으로 다시 잰다</b> — 합성이 섞인 점수는 실제 성능보다 항상 높게 나온다.</p>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="idx">라운드</div>
+        <div>
+          <h4>클래스를 나눠 여러 벌로</h4>
+          <p>한 벌로 여덟 종류를 다 학습시켰더니 일부 클래스가 서로를 잡아먹었다. 그래서 라운드를 나눠 학습시키고 <b>각 라운드가 자신 있는 클래스만</b> 맡는다. 결과를 합친 뒤 클래스별 NMS(IoU 0.5)로 중복을 정리한다.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="note warn">
+      <p><strong>클래스 순서 0~7은 모든 모델이 같아야 한다.</strong> 순서가 한 칸 밀리면 "비상구"라고 찍은 것이 실제로는 "소화기"가 되고, 그 오류는 도면이 저장된 뒤에야 드러난다. 그래서 서비스가 뜰 때 순서를 검사하고, 어긋나면 아예 뜨지 않는다.</p>
+    </div>
+  </section>
+
+  <!-- ============================================ 라우터 -->
+  <section>
+    <div class="sec-head"><span class="tag">라운드 6</span><h2>클래스별로 담당 모델을 배정했다</h2></div>
+
+    <p>최신 학습(라운드 6)에서는 모델 세 벌을 놓고 <strong>클래스마다 가장 잘하는 한 벌을 골라</strong> 라우팅 표로 굳혔다. 확신도 문턱은 전 클래스 공통 0.75다.</p>
+
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th><th>클래스</th><th>담당 모델</th>
+            <th class="num">검증 재현율</th><th class="num">TP / FP / FN</th>
+            <th class="num">시험 재현율</th><th class="num">TP / FP / FN</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="num">0</td><td>비상구 <em class="mono" style="color:var(--muted);font-style:normal">exit</em></td><td><span class="pill model">round2</span></td><td class="num">1.000</td><td class="num">150 / 0 / 0</td><td class="num">1.000</td><td class="num">150 / 0 / 0</td></tr>
+          <tr><td class="num">1</td><td>계단 <em class="mono" style="color:var(--muted);font-style:normal">stair</em></td><td><span class="pill model">round2</span></td><td class="num">1.000</td><td class="num">75 / 0 / 0</td><td class="num">1.000</td><td class="num">75 / 0 / 0</td></tr>
+          <tr><td class="num">2</td><td>승강기 <em class="mono" style="color:var(--muted);font-style:normal">elevator</em></td><td><span class="pill model">round2</span></td><td class="num">1.000</td><td class="num">75 / 0 / 0</td><td class="num">1.000</td><td class="num">75 / 0 / 0</td></tr>
+          <tr><td class="num">3</td><td>소화기 <em class="mono" style="color:var(--muted);font-style:normal">extinguisher</em></td><td><span class="pill model">stage_b</span></td><td class="num">0.991</td><td class="num">113 / 0 / 1</td><td class="num">0.965</td><td class="num">109 / 0 / 4</td></tr>
+          <tr><td class="num">4</td><td>소화전 <em class="mono" style="color:var(--muted);font-style:normal">hydrant</em></td><td><span class="pill model">stage_b</span></td><td class="num">0.991</td><td class="num">112 / 0 / 1</td><td class="num">1.000</td><td class="num">115 / 0 / 0</td></tr>
+          <tr><td class="num">5</td><td>현위치 <em class="mono" style="color:var(--muted);font-style:normal">you_are_here</em></td><td><span class="pill model">round2</span></td><td class="num">1.000</td><td class="num">75 / 0 / 0</td><td class="num">1.000</td><td class="num">75 / 0 / 0</td></tr>
+          <tr><td class="num">6</td><td>출입문 <em class="mono" style="color:var(--muted);font-style:normal">door</em></td><td><span class="pill model">stage_a</span></td><td class="num">1.000</td><td class="num">782 / 0 / 0</td><td class="num">1.000</td><td class="num">779 / 0 / 0</td></tr>
+          <tr><td class="num">7</td><td>실 <em class="mono" style="color:var(--muted);font-style:normal">room</em></td><td><span class="pill model">round2</span></td><td class="num">1.000</td><td class="num">782 / 0 / 0</td><td class="num">1.000</td><td class="num">779 / 0 / 0</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p><strong>정밀도는 8클래스 모두 1.000, 거짓양성 0건이다.</strong> 재현율도 소화기 시험 0.965를 제외하면 전부 1.000 — 놓친 객체가 검증에서 2개, 시험에서 4개뿐이다.</p>
+
+    <div class="note">
+      <p><strong>재현율을 먼저 보는 이유.</strong> mAP가 아니라 클래스별 재현율을 지표로 삼았다. 없는데 있다고 나온 비상구는 사람이 편집기에서 금방 알아채지만, <b>있는데 없다고 나온 비상구는 아무도 알아채지 못한 채 저장된다.</b> 그래서 문턱도 낮게(서비스 0.25) 잡아 많이 건지고, 걸러내는 일을 사람과 규칙에 맡긴다.</p>
+    </div>
+
+    <div class="note warn">
+      <p><strong>이 표는 상한으로 읽어야 한다.</strong> 라운드 6 리포트에는 검증·시험 분할의 구성이 담겨 있지 않고, 학습 데이터의 뼈대는 합성 도면이다. 합성이 섞인 점수는 실제 성능보다 항상 높게 나온다 — 실제 사진에서의 거동은 아래 절에서 따로 잰다.</p>
+    </div>
+  </section>
+
+  <!-- ============================================ 실측 -->
+  <section>
+    <div class="sec-head"><span class="tag">실측</span><h2>실제 벽에 걸린 안내도로 돌려 보면</h2></div>
+
+    <h3>추론 해상도를 800에서 1280으로 올린 이유</h3>
+    <p>피난안내도의 비상구 픽토그램은 도면 전체 대비 아주 작다. 853px 사진에서 픽토그램 하나가 12~26px인데, 768로 줄여 추론하면 10px 안팎이 되어 모델이 사실상 못 본다. 같은 사진(<code>촬영도면/draft-1-1.jpg</code>, 853×640)을 해상도만 바꿔 재면:</p>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th>추론 해상도</th><th class="num">탐지 수</th><th class="num">비상구 최고 확신도</th><th class="num">CPU 소요</th></tr></thead>
+        <tbody>
+          <tr><td>768 px</td><td class="num">12</td><td class="num">0.529</td><td class="num">0.62초</td></tr>
+          <tr><td><b>1280 px</b> <span class="pill ok">채택</span></td><td class="num">22</td><td class="num"><b>0.864</b></td><td class="num">1.46초</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>1920까지 올리면 탐지가 더 늘지만 <code>you_are_here</code> 오탐이 폭발한다(실제 1개 → 21개). 1280이 지금 가중치에서의 균형점이다.</p>
+
+    <h3>모델이 배운 적 없는 것 — 제목과 범례</h3>
+    <p>모델은 초록 픽토그램을 찾도록 학습됐고 실제로 잘 찾는다. 문제는 도면에 픽토그램처럼 생긴 것이 세 군데 있다는 점이다: <b>도면 안</b>(우리가 원하는 것), <b>범례</b>("■ 비상구 방향" 같은 설명), <b>제목·초록 띠</b>(초록 바탕이라 통째로 비상구로 잡힌다). 뒤 둘은 모델이 못 배운 것이 아니라 <strong>아무도 가르친 적이 없는 구분</strong>이다.</p>
+
+    <p>재학습으로도 고칠 수 있지만, 백엔드에 걸름망 둘을 두어 <strong>지금 가진 가중치 그대로</strong> 해결했다. ① 크기 — 픽토그램은 도면 폭의 6%를 넘지 않는다. ② 배치 — 좁은 세로 띠에 여러 종류가 줄지어 있으면 그건 설명란이다.</p>
+
+    <div class="pair">
+      <figure>
+        <div class="badge-row"><span class="badge before">걸름망 전</span><span class="badge">탐지 22개</span></div>
+        <img src="figs/detect-draft-1-1.jpg" alt="실제 피난안내도 사진에 원시 탐지 결과를 그린 이미지. 제목 글자와 범례에도 비상구 상자가 잡혀 있다">
+        <figcaption>모델이 낸 그대로. 제목 글자 "방향화살표가 없는 피난 안내도"가 통째로 비상구로 잡히고, 왼쪽 범례 칸의 설명용 아이콘이 <b>확신도 0.86</b>으로 도면 안 픽토그램보다 더 세게 잡혔다.</figcaption>
+      </figure>
+      <figure>
+        <div class="badge-row"><span class="badge after">걸름망 후</span><span class="badge">남은 것 6개</span></div>
+        <img src="figs/filtered-draft-1-1.jpg" alt="같은 사진에 크기·범례 걸름망을 적용한 뒤의 탐지 결과">
+        <figcaption>크기로 11개, 범례 영역에서 5개를 버려 <b>실제 위치 6개</b>만 남았다 — 비상구 4, 소화전 1, 실 1. 버린 개수와 이유는 편집기에 경고로 함께 뜬다.</figcaption>
+      </figure>
+    </div>
+
+    <div class="note">
+      <p><strong>범례를 걸러내지 않으면 무슨 일이 생기나.</strong> 대피 경로의 출구가 범례 상자 안에 생기고, 시각장애인이 벽에 걸린 안내판 앞으로 안내된다. 걸름망은 미관 문제가 아니라 안전 문제다.</p>
+    </div>
+  </section>
+
+  <!-- ============================================ 파이프라인 -->
+  <section>
+    <div class="sec-head"><span class="tag">효과</span><h2>도면 하나 등록에 10분 → 1분</h2></div>
+
+    <p>탐지기가 좌표를 찍고 언어모델이 이름과 통로를 얹은 뒤, 사람이 확인한다. 정답을 아는 시험 도면(AI공학관 3층, 비상구 2곳·복도 교차점)으로 잰 값이다.</p>
+
+    <div class="scroller">
+      <table>
+        <thead><tr><th>입력</th><th class="num">지점 정확도</th><th class="num">비상구 위치 오차</th><th class="num">교차점 오차</th><th class="num">시간</th></tr></thead>
+        <tbody>
+          <tr><td>깨끗한 도면 이미지</td><td class="num">4 / 4</td><td class="num">1.0%</td><td class="num">0.7%</td><td class="num">15초</td></tr>
+          <tr><td>폰 사진처럼 (3.5° 기울기 · 반사광 · 흐림 · JPEG 70%)</td><td class="num">4 / 4</td><td class="num">0.4~0.9%</td><td class="num">1.1%</td><td class="num">19초</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>사진이 망가져도 정확도가 거의 안 떨어졌다 — 피난안내도가 <strong>선·색 위주의 규격 그림</strong>이라 압축·흐림에 강한 덕이다. 실제 사진(AI공학관 3층, 1100×744)에서는 CPU 3.5초에 지점 16곳·통로 16개를 얻었고, 이는 손으로 찍었던 15곳과 비슷한 수다. 읽어낸 도면을 그대로 저장·활성화해 경로 계산까지 확인했다: <code>301 강의실 → 서쪽 복도 교차점 → 서쪽 비상구 계단 (12.75m)</code></p>
+  </section>
+
+  <!-- ============================================ 한계 -->
+  <section>
+    <div class="sec-head"><span class="tag">정직한 고지</span><h2>아직 안 되는 것</h2></div>
+
+    <div class="pair">
+      <figure>
+        <img src="figs/filtered-draft-2-1.jpg" alt="가로형 피난안내도 사진의 탐지 결과. 도면 안 비상구 픽토그램이 대부분 잡히지 않았다">
+        <figcaption><b>못 잡은 사례.</b> 이 도면에서는 안쪽 비상구 픽토그램을 대부분 놓쳤다. 기호 양식이 학습 데이터와 다르고(초록 바탕 대신 흰 바탕 테두리), 화면 반사가 겹쳤다. 원시 13개 → 걸름망 후 5개.</figcaption>
+      </figure>
+      <div>
+        <ul class="tight">
+          <li><b>도면 양식이 바뀌면 재현율이 떨어진다.</b> 2부 실촬 데이터를 건물 대여섯 곳으로 넓히는 것이 다음 과제다. 비상구 재현율이 0.9 아래인 양식은 현장에 쓰지 않는다.</li>
+          <li><b>비상계단을 <code>stair</code>로 찍어 온다.</b> 대피 목표가 되는 건 <code>exit</code>뿐이라 그대로 두면 갈 곳이 없어진다. <code>exit</code>이 하나도 없으면 <code>stair</code>를 승격시키되 반드시 경고한다 — 옥상 전용 계단이 섞였을 수 있고 그건 사람만 안다.</li>
+          <li><b>축척은 판독하지 않는다.</b> 문 폭으로 어림할 수는 있지만 두 배 틀리면 "8미터 직진"이 16미터가 되어 시각장애인이 모퉁이를 지나친다. 이 숫자 하나는 사람이 직접 넣는다.</li>
+          <li><b>서비스에 붙은 가중치는 아직 라운드 6이 아니다.</b> 현재 <code>ml/detector/models</code>의 두 파일은 SHA-256이 같은 동일 가중치라, 실질적으로 한 벌을 두 번 돌리고 있다. 라운드 6의 <code>stage_a</code>·<code>stage_b</code>와 라우팅 표를 붙이는 것이 바로 다음 작업이다.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>이 문서의 수치는 저장소에서 직접 뽑아 다시 계산한 것이다.</p>
+    <ul>
+      <li>클래스 분포·데이터셋 통계 — <code>ml-colab.zip</code>의 라벨 3,142줄을 다시 집계</li>
+      <li>클래스별 지표 — <code>round6_models_for_vscode.zip / allclass_selection_report.json</code></li>
+      <li>학습 설정 — <code>ml/train_colab.ipynb</code></li>
+      <li>실측 탐지·해상도 비교·걸름망 — <code>촬영도면/</code>의 사진으로 2026-08-20 CPU에서 직접 실행</li>
+      <li>걸름망 규칙 — <code>backend/src/planReader/graph.js</code>의 판정을 그대로 옮겨 적용</li>
+    </ul>
+  </footer>
+</div>
+
+<script>
+  const CLASSES = [
+    { ko: "실", en: "room", n: 1000, role: "struct" },
+    { ko: "출입문", en: "door", n: 1000, role: "struct" },
+    { ko: "소화기", en: "extinguisher", n: 343, role: "fire" },
+    { ko: "비상구", en: "exit", n: 303, role: "escape" },
+    { ko: "계단", en: "stairs", n: 166, role: "escape" },
+    { ko: "소화전", en: "hydrant", n: 165, role: "fire" },
+    { ko: "현위치", en: "you_are_here", n: 91, role: "start" },
+    { ko: "승강기", en: "elevator", n: 74, role: "escape" },
+  ];
+  const COLOR = {
+    escape: "var(--accent)",
+    fire: "var(--alert)",
+    start: "var(--amber)",
+    struct: "var(--muted)",
+  };
+  const max = Math.max(...CLASSES.map(c => c.n));
+  const host = document.getElementById("bars");
+  for (const c of CLASSES) {
+    const name = document.createElement("div");
+    name.className = "name";
+    name.innerHTML = c.ko + "<em>" + c.en + "</em>";
+    const track = document.createElement("div");
+    track.className = "track";
+    const fill = document.createElement("i");
+    fill.style.width = (c.n / max * 100).toFixed(1) + "%";
+    fill.style.background = COLOR[c.role];
+    track.appendChild(fill);
+    const val = document.createElement("div");
+    val.className = "val";
+    val.textContent = c.n.toLocaleString();
+    host.append(name, track, val);
+  }
+</script>
+</body>
+</html>

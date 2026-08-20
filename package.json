@@ -11,7 +11,8 @@
     "sync": "node scripts/sync-shared.mjs",
     "start": "npm run sync && node backend/src/server.js",
     "test": "npm run sync && node test/route.test.mjs && node test/positioning.test.mjs && node test/plan-reader.test.mjs && node backend/test/api.test.mjs",
-    "detector": "python -m uvicorn app:app --host 127.0.0.1 --port 8001 --app-dir ml/detector"
+    "detector": "python -m uvicorn app:app --host 127.0.0.1 --port 8001 --app-dir ml/detector",
+    "docs": "node scripts/docs-server.mjs"
   },
   "engines": {
     "node": ">=20"
