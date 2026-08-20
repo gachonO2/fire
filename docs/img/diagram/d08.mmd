@@ -1,0 +1,13 @@
+sequenceDiagram
+  participant APP as 사용자 앱
+  participant BE as 백엔드
+  participant AD as 관제 대시보드
+  participant GD as 보호자 화면
+  actor V as 대피자
+  APP->>BE: POST /api/route {from}
+  BE-->>APP: route: null (모든 출구 차단)
+  APP->>V: 매우 긴 진동 2회 + "제자리에서 구조요청을 전송합니다. 이동하지 말고 대기하세요."
+  APP->>BE: POST /api/sos (위치·상태)
+  BE->>BE: 보호자 연락처 자동 첨부
+  BE-->>AD: SSE: SOS 카드 (이름·연락처 포함)
+  BE-->>GD: SSE: 상태 배너 '구조 요청' + 브라우저 알림

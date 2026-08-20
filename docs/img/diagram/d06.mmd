@@ -1,0 +1,15 @@
+sequenceDiagram
+  actor OP as 관제
+  participant AD as 관제 대시보드
+  participant BE as 백엔드
+  participant APP as 사용자 앱
+  actor V as 대피자
+  OP->>AD: 남쪽 램프(E11) 클릭 → 화재 지정
+  AD->>BE: PUT /api/hazards/E11 {type:'fire'} (x-admin-token)
+  BE->>BE: 검증·병합 (더 심각한 쪽 채택)
+  BE-->>APP: SSE: hazards 변경
+  BE-->>AD: SSE: 지도 갱신
+  APP->>APP: 재탐색 (오프라인이면 로컬 Dijkstra)
+  APP->>BE: POST /api/metrics {reroute: 0.8ms}
+  APP->>V: 길게 3회 진동 + "위험. 전방 통로 상태가 변경되었습니다"
+  APP->>V: 새 경로 안내 (계단 B로 우회)

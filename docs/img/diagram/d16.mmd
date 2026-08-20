@@ -1,0 +1,13 @@
+sequenceDiagram
+  participant PR as planReader
+  participant GW as 게이트웨이/API
+  PR->>GW: 같은 질문 + 이미지 첨부
+  GW-->>PR: 응답 A (input_tokens_A)
+  PR->>GW: 같은 질문, 이미지 없이
+  GW-->>PR: 응답 B (input_tokens_B)
+  alt input_tokens_A > input_tokens_B
+    PR->>PR: 이미지 전달 확인 → 판독 진행
+  else 늘지 않음
+    PR->>PR: 이미지 미전달 → 판독 거부 (503)
+  end
+  Note over PR: 모델 실력과 무관하게 **전달 여부만** 가리므로<br/>어떤 게이트웨이에도 통한다. 결과는 프로세스 생존 동안 재사용

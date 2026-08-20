@@ -1,0 +1,60 @@
+erDiagram
+  PLANS {
+    string id PK
+    string name
+    number metersPerUnit
+    number northOffset
+    json nodes
+    json edges
+    boolean draft "앱 접수 초안 여부"
+    boolean active "활성 도면"
+    string imageDataUri "900KB 이하"
+  }
+  HAZARDS {
+    string edgeId PK
+    string type "fire·smoke·blocked"
+    string source "manual(관제)·sensor"
+    timestamp updatedAt
+  }
+  SENSOR_READINGS {
+    string sensorId PK
+    string edgeId "또는 nodeId"
+    number celsius
+    timestamp ts "60초 경과 시 노후"
+  }
+  POSITIONS {
+    string userId PK
+    string nodeId
+    string status "대기·대피중·SOS·완료"
+    number confidence
+    json route
+  }
+  SOS {
+    string id PK
+    string userId FK
+    string nodeId
+    json guardianContact "자동 첨부"
+    timestamp ts
+  }
+  GUARDIANS {
+    string code PK "6자리 공유 코드"
+    string userId FK
+    string name
+    string phone
+  }
+  ALERTS {
+    string id PK
+    string code FK
+    string status "상태 전이 시에만 생성"
+    timestamp ts
+  }
+  METRICS {
+    string id PK
+    number rerouteMs "재탐색 KPI"
+    timestamp ts
+  }
+  PLANS ||--o{ HAZARDS : "edgeId 참조"
+  PLANS ||--o{ SENSOR_READINGS : "edge/node 참조"
+  POSITIONS ||--o{ SOS : "userId"
+  GUARDIANS ||--o{ ALERTS : "code"
+  GUARDIANS ||--|| POSITIONS : "userId (관찰 대상)"

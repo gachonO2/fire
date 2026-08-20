@@ -1,0 +1,49 @@
+flowchart LR
+  subgraph CLIENT["클라이언트 (브라우저 PWA)"]
+    U["사용자 앱 index.html<br/>음성·진동·aria-live"]
+    A["관제 대시보드 admin.html"]
+    G["보호자 화면 guardian.html"]
+    AR["도면 편집기 architect.html"]
+    D["통합 시연 demo.html"]
+    SW["sw.js 오프라인 캐시<br/>(/api/* 캐시 금지)"]
+    FS["frontend/shared/ 사본<br/>오프라인 폴백 계산"]
+  end
+
+  subgraph MOBILE["mobile/ (Expo iOS 앱)"]
+    M["촬영·경보·안내 화면<br/>진동·스테레오 사운드"]
+  end
+
+  subgraph BE["backend/ (Node 20 + Express, :8080)"]
+    RT["routes/*<br/>evacuation·hazards·sensors·plans·telemetry·guardians·stream"]
+    FL["floor.js 활성 도면<br/>+ 통합 위험 상태"]
+    EV["events.js 이벤트 허브"]
+    PR["planReader.js<br/>탐지기+언어모델 이음매"]
+    REPO["repositories/<br/>FirestoreRepo | MemoryRepo"]
+    AUTH["middleware/auth.js<br/>x-admin-token"]
+  end
+
+  SH["shared/ 단일 진실 소스<br/>floor-plan · pathfinding(Dijkstra)<br/>hazard-rules · positioning · beacon-sim"]
+
+  subgraph EXT["외부"]
+    F[("Firestore<br/>plans·hazards·sos·positions<br/>metrics·guardians·alerts")]
+    ML["ml/detector (FastAPI :8001)<br/>YOLO 2벌 기호 탐지"]
+    LLM["언어모델 API<br/>Gemini(우선) / Claude"]
+    SEN["온도 센서·화재수신기<br/>게이트웨이 (규격 연동)"]
+    BC["BLE 비콘 / 가상 비콘"]
+  end
+
+  U -- "REST /api/*" --> RT
+  A -- "REST 🔒" --> RT
+  AR -- "REST" --> RT
+  M -- "REST" --> RT
+  RT -- "SSE /api/stream" --> U
+  RT -- "SSE" --> A
+  RT -- "SSE ?code= 스코프" --> G
+  BE -- "Admin SDK (서비스 계정)" --> F
+  PR -- "POST /detect" --> ML
+  PR -- "이미지+지시문" --> LLM
+  SEN -- "POST /api/sensors/*" --> RT
+  BC -- "RSSI 스캔" --> U
+  BC -- "RSSI 스캔" --> M
+  SH --- BE
+  SH -. "npm run sync 복사" .-> FS

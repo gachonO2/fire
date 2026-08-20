@@ -1,0 +1,24 @@
+sequenceDiagram
+  actor P as 수집가
+  participant M as 모바일 앱
+  participant BE as 백엔드
+  participant ML as 탐지기(YOLO)
+  participant LM as 언어모델
+  actor E as 편집자/관제
+  participant AR as 도면 편집기
+  P->>M: 촬영(정렬 판정)→확인→가로 폭·방위 입력
+  M->>BE: POST /api/plans/draft {name, dataUri, widthM, northOffset}
+  BE->>ML: POST /detect (있으면)
+  ML-->>BE: 기호 상자 (정규화 좌표)
+  BE->>LM: 이미지+지시문 (좌표 재질문 없음)
+  LM-->>BE: 이름·통로 연결·신뢰도·메모
+  BE-->>M: {planId, nodes, edges, confidence, warnings, needsReview}
+  Note over BE: draft 상태 — 안내에 쓰이지 않음
+  E->>AR: 목록에서 "📱 앱에서 접수 · 확인 필요" 열기
+  AR->>BE: PUT /api/plans/:id/activate (draft) 
+  BE-->>AR: 409 거부
+  E->>AR: 눈으로 확인·수정 후 저장 (draft 해제)
+  E->>AR: 활성화
+  AR->>BE: PUT /api/plans/:id/activate 🔒
+  BE-->>AR: 200
+  BE-->>BE: SSE: 열려 있는 모든 화면에 새 도면 전파

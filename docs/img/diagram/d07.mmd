@@ -1,0 +1,11 @@
+sequenceDiagram
+  participant S as 센서 게이트웨이<br/>(또는 관제 🌡️ 도구)
+  participant BE as 백엔드
+  participant APP as 사용자 앱
+  participant AD as 관제 대시보드
+  S->>BE: POST /api/sensors/temperature {sensorId:'TMP-C4', edgeId:'C4', celsius:71}
+  BE->>BE: 임계 판정 (71≥60 → 통행 불가)
+  BE->>BE: 관제 지정과 병합
+  BE-->>APP: SSE: hazards 변경 → 재탐색
+  BE-->>AD: SSE: 온도 배지 표시
+  Note over BE: 60초 미갱신 시 판독 끊김 → 신뢰 안 함, 흐린 ⚠

@@ -1,0 +1,18 @@
+sequenceDiagram
+  actor V as 대피자
+  participant B as BeaconSense
+  participant APP as 사용자 앱
+  participant BE as 백엔드
+  participant GD as 보호자 화면
+  B->>B: 주기 스캔→평활→최근접 판정
+  B->>APP: onLocate(nodeId, locked=true)
+  APP->>V: aria-live "현재 위치는 301호 진료실 앞입니다"
+  V->>APP: 대피 시작
+  APP->>V: 긴 진동 1회 + "대피 모드를 시작합니다"
+  APP->>BE: POST /api/route {from, kind:'fire'}
+  BE->>BE: routeToNearestExit(도면, from, 위험)
+  BE-->>APP: 경로(남쪽 비상구) + 계산시간
+  APP->>BE: PUT /api/positions/:userId (대피 중)
+  BE->>BE: 상태 전이 → 알림 생성
+  BE-->>GD: SSE: 🚨 대피 시작 + 위치·경로
+  APP->>V: "정면으로 9걸음 이동하세요. 오른쪽 벽을 따라가세요."
