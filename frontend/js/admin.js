@@ -425,6 +425,21 @@ function drawHazards() {
     // 본체 하나 + 혓바닥 다섯. 혓바닥은 각자 다른 박자로 커졌다 작아져서
     // 윤곽이 매 순간 달라진다 — 정지한 원 하나면 «표식» 이지만, 서로 어긋나게
     // 뛰는 덩어리는 «번지는 것» 으로 보인다.
+    // **발화 섬광 — 누른 순간이 보여야 한다.**
+    //
+    // 불은 처음에 작다. 그게 맞지만, 관제에서 방을 누르고 아무 일도 안
+    // 일어난 것처럼 보이면 사람은 «고장» 으로 읽고 다시 누른다. 처음 몇 초만
+    // 크게 한 번 퍼졌다 사라지는 고리를 얹는다 — 값은 안 바꾸고 «여기 방금
+    // 났다» 만 말한다.
+    if (elapsed < 6000) {
+      parts.push(`<circle cx="${at.x}" cy="${at.y}" r="${(r * 1.2).toFixed(2)}"
+        fill="none" stroke="${c.core}" stroke-width="${(u * 1.6).toFixed(2)}">
+        <animate attributeName="r" values="${(r * 0.6).toFixed(2)};${(rMax * 1.15).toFixed(2)}"
+          dur="1.1s" repeatCount="5"/>
+        <animate attributeName="opacity" values="1;0" dur="1.1s" repeatCount="5"/>
+      </circle>`);
+    }
+
     parts.push(`<circle cx="${at.x}" cy="${at.y}" r="${r.toFixed(2)}" fill="url(#${gid})">
       <animate attributeName="r" values="${(r * .94).toFixed(2)};${(r * 1.06).toFixed(2)};${(r * .94).toFixed(2)}"
         dur="${(3.1 + i * .4).toFixed(1)}s" repeatCount="indefinite"/>
@@ -523,8 +538,16 @@ function drawSensors() {
     const state = c >= TEMP.BLOCK ? 'block' : c >= TEMP.WARN ? 'warn' : 'ok';
     const stale = now - (x.ts ?? now) > TEMP.STALE_MS;
     const tint = { ok: '#4d9fff', warn: '#e79a3c', block: '#ff4438' }[state];
-    const w = u * 9.4;
-    const h = u * 4.6;
+    // **우는 감지기는 크게, 조용한 감지기는 작게.**
+    //
+    // 여섯 개를 다 같은 크기로 그렸더니 «어느 것이 우나» 를 숫자로 읽어야
+    // 알 수 있었다. 이 화면에서 감지기의 값어치는 «불이 났다는 것을 기계가
+    // 먼저 안다» 를 보여 주는 것이고, 그러려면 우는 하나가 흘깃 봐도 튀어야
+    // 한다. 정상인 다섯은 «다 재고 있다» 만 말하면 되므로 작아도 된다.
+    const loud = state !== 'ok';
+    const k = loud ? 1.45 : 1;
+    const w = u * 9.4 * k;
+    const h = u * 4.6 * k;
     // **배지를 지점 오른쪽에 붙인다.**
     //
     // 밑에 뒀더니 불난 통로의 「화재 · 1분 4초째」 글씨와 겹쳐서, 화면에는
@@ -532,22 +555,33 @@ function drawSensors() {
     // 세로로 쌓이고 배지는 가로로 비켜서면 서로 안 밟는다.
     // 경보 중이면 테를 두껍게 하고 맥이 뛴다 — 숫자만으로는 여섯 개 중 어느
     // 것이 우는지 흘깃 봐서 안 갈린다.
-    const ring = state === 'block'
-      ? `<circle cx="${n.x}" cy="${n.y}" r="${u * 3.4}" fill="none" stroke="${tint}"
-           stroke-width="${u * 0.7}" opacity=".9">
-           <animate attributeName="r" values="${u * 3}; ${u * 6}; ${u * 3}"
-             dur="1.5s" repeatCount="indefinite"/>
-           <animate attributeName="opacity" values=".9;0;.9" dur="1.5s" repeatCount="indefinite"/>
+    // 경고(45℃)부터 맥이 뛴다. 차단(60℃)에서만 뛰게 했더니 «올라가는 중» 이
+    // 화면에서 통째로 빠졌다 — 관제가 대비할 시간이 그 구간이다.
+    const ring = loud
+      ? `<circle cx="${n.x}" cy="${n.y}" r="${u * 4}" fill="${tint}" opacity=".18">
+           <animate attributeName="opacity" values=".28;.06;.28"
+             dur="${state === 'block' ? 1 : 1.8}s" repeatCount="indefinite"/>
+         </circle>
+         <circle cx="${n.x}" cy="${n.y}" r="${u * 3.4}" fill="none" stroke="${tint}"
+           stroke-width="${u * 0.9}" opacity=".9">
+           <animate attributeName="r" values="${u * 3}; ${u * 9}; ${u * 3}"
+             dur="${state === 'block' ? 1.2 : 2.2}s" repeatCount="indefinite"/>
+           <animate attributeName="opacity" values="1;0;1"
+             dur="${state === 'block' ? 1.2 : 2.2}s" repeatCount="indefinite"/>
          </circle>` : '';
     return `${ring}
-      <circle cx="${n.x}" cy="${n.y}" r="${u * 1.5}" fill="${tint}"
+      <circle cx="${n.x}" cy="${n.y}" r="${u * 1.5 * k}" fill="${tint}"
         stroke="rgba(8,10,14,.9)" stroke-width="${u * 0.5}" opacity="${stale ? 0.45 : 1}"/>
       <rect x="${n.x + u * 2.4}" y="${n.y - h / 2}" width="${w}" height="${h}" rx="${u * 1.2}"
         fill="${tint}" opacity="${stale ? 0.4 : 0.95}"
         stroke="rgba(8,10,14,.75)" stroke-width="${u * 0.4}"/>
-      <text x="${n.x + u * 2.4 + w / 2}" y="${n.y + u * 1.15}" text-anchor="middle"
-        font-size="${u * 3.1}" font-weight="800" fill="#0b0f14"
-        >${Math.round(c)}°C${stale ? ' ⚠' : ''}</text>`;
+      <text x="${n.x + u * 2.4 + w / 2}" y="${n.y + u * 1.15 * k}" text-anchor="middle"
+        font-size="${u * 3.1 * k}" font-weight="800" fill="#0b0f14"
+        >${Math.round(c)}°C${stale ? ' ⚠' : ''}</text>
+      ${loud ? `<text x="${n.x + u * 2.4 + w / 2}" y="${n.y - h * 0.62}" text-anchor="middle"
+        font-size="${u * 2.9}" font-weight="800" fill="${tint}"
+        paint-order="stroke" stroke="rgba(8,10,14,.9)" stroke-width="${u}"
+        >${state === 'block' ? '열감지 · 통로 차단' : '열감지 · 온도 상승'}</text>` : ''}`;
   }).join('');
 }
 
@@ -1528,12 +1562,15 @@ function drawRooms() {
       // 0.5 로 꽉 채우면 방이 통째로 «빨간 네모» 가 되고, 그 위에 그린 불
       // 덩어리가 그 안에 묻힌다. 방은 **어디가 타는 구역인가**만 물들이고,
       // 불꽃 모양은 위험 레이어에 맡긴다.
+      // 0.07 에서 시작했더니 갓 난 불의 방이 평상시 방과 구분이 안 됐다.
+      // 어느 방이 타는지는 **처음부터** 읽혀야 한다 — 번지는 정도는 그 위에
+      // 얹는 정보지, «보이나 안 보이나» 를 가르는 값이 아니다.
       const g = heat.get(i) ?? 0;
-      const fillOp = (0.07 + 0.2 * g).toFixed(3);
+      const fillOp = (0.26 + 0.24 * g).toFixed(3);
       return `<g>
         <polygon points="${d}" fill="var(--danger)" fill-opacity="${fillOp}"/>
-        <polygon points="${d}" fill="none" stroke="#ff7a6b" stroke-width="${u * 1.1}"
-          stroke-opacity="${(0.45 + 0.4 * g).toFixed(2)}"/>
+        <polygon points="${d}" fill="none" stroke="#ff7a6b" stroke-width="${u * 1.8}"
+          stroke-opacity="${(0.75 + 0.25 * g).toFixed(2)}"/>
       </g>`;
     }
     if (here) {
@@ -1894,12 +1931,24 @@ function wireOrbit() {
     // 치고 놓을 때의 클릭을 삼킨다. 제자리에서 누르면 그대로 통로 클릭이다.
     // 끌었나 아닌가는 손이 이미 답을 알려 준다.
     drag = {
-      x: e.clientX, y: e.clientY, moved: 0,
+      x: e.clientX, y: e.clientY, moved: 0, captured: false,
       spin: e.shiftKey, tilt0: read('--tilt'), spin0: read('--spin'),
       panx: pan.x, pany: pan.y,
     };
-    stage.classList.add('dragging');
-    stage.setPointerCapture(e.pointerId);
+    // **여기서 포인터를 잡지 않는다.**
+    //
+    // `setPointerCapture` 를 누르는 순간 걸면, 뒤이어 오는 `click` 의 대상이
+    // 지도 요소가 아니라 **판(stage)** 으로 바뀐다. 판은 지도의 조상이라
+    // 이벤트가 지도를 아예 안 지나가고, 통로 핸들러도 빈 곳 핸들러도 영영
+    // 안 불린다. 「화재를 골라 방을 눌러도 아무 일이 없다」 가 이것이었다.
+    //
+    //   pointerdown  tgt=circle      ← 지도 요소
+    //   pointerup    tgt=DIV#stage   ← 잡는 순간 판으로 바뀐다
+    //   click        tgt=DIV#stage   ← 지도를 안 지나간다
+    //
+    // 그래서 **실제로 끌기 시작했을 때만** 잡는다. 잡는 목적은 손가락이
+    // 판 밖으로 나가도 이동이 이어지게 하는 것인데, 그건 움직이고 나서야
+    // 필요한 일이다. 제자리에서 누르면 잡을 일이 없고, 클릭은 그대로 간다.
   });
 
   stage.addEventListener('pointermove', e => {
@@ -1907,6 +1956,15 @@ function wireOrbit() {
     const dx = e.clientX - drag.x;
     const dy = e.clientY - drag.y;
     drag.moved = Math.max(drag.moved, Math.hypot(dx, dy));
+
+    // 문턱을 넘은 **그때** 잡는다 — 이제부터는 진짜 끌기이므로, 손가락이
+    // 판 밖으로 나가도 이동이 끊기지 않아야 한다.
+    if (drag.moved > CLICK_SLOP && !drag.captured) {
+      drag.captured = true;
+      stage.classList.add('dragging');
+      try { stage.setPointerCapture(e.pointerId); } catch (_) { /* 이미 놓친 포인터 */ }
+    }
+    if (!drag.captured) return;   // 아직 클릭일 수 있다 — 화면을 안 움직인다
 
     if (drag.spin) {
       // 0도(완전 평면)~78도. 그 너머는 판이 선처럼 얇아져 아무것도 안 보인다.
@@ -1923,9 +1981,10 @@ function wireOrbit() {
   const end = e => {
     if (!drag) return;
     const moved = drag.moved;
+    const captured = drag.captured;
     drag = null;
     stage.classList.remove('dragging');
-    try { stage.releasePointerCapture(e.pointerId); } catch (_) {}
+    if (captured) { try { stage.releasePointerCapture(e.pointerId); } catch (_) {} }
     if (moved > CLICK_SLOP) {
       const eat = ev => { ev.stopPropagation(); ev.preventDefault(); };
       stage.addEventListener('click', eat, { capture: true, once: true });

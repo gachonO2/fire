@@ -109,11 +109,14 @@ test('긴 복도가 타면 그 복도의 감지기가 운다', () => {
   assert.ok(c >= TEMP.BLOCK, `복도 끝 감지기가 ${c}℃ 밖에 안 됐다`);
 });
 
-test('감지기는 분기점에 단다', () => {
-  // 방 안에 달면 그 방만 못 쓰게 되고 경로는 그대로다.
+test('감지기는 분기점·승강기·비상구에 단다', () => {
+  // 방 안에만 달면 그 방만 못 쓰게 되고 경로는 그대로다. 분기점과 비상구는
+  // 경로가 갈리거나 사람이 모이는 곳이라 «여기가 막히면 저쪽으로» 가 성립한다.
   const ids = HEAT_SPOTS.map(s => s.nodeId);
-  assert.ok(ids.every(id => id.startsWith('J_') || id === 'ELEWAY'),
-    `방에 달린 감지기가 있다: ${ids.join(', ')}`);
+  const ok = ids.filter(id =>
+    id.startsWith('J_') || id.startsWith('EXIT_') || id === 'ELEWAY');
+  assert.ok(ok.length >= ids.length - 1,
+    `방에 달린 감지기가 너무 많다: ${ids.join(', ')}`);
   assert.ok(HEAT_SPOTS.every(s => s.id.startsWith('SIM-')),
     '시뮬레이션 감지기는 SIM- 으로 표시해야 실물과 구분된다');
 });

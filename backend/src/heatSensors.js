@@ -42,7 +42,24 @@ import { activeFloorPlan } from './floor.js';
 import { getRepo } from './repositories/index.js';
 
 /**
- * 감지기를 달 지점. **분기점과 승강기 앞** — 경로가 갈리는 곳이다.
+ * 감지기를 달 지점. **분기점·승강기 앞·비상구** — 경로가 갈리는 곳과
+ * 사람이 모이는 곳이다.
+ *
+ * 방 안에 달면 그 방 하나만 못 쓰게 되고 경로는 그대로다. 분기점이라야
+ * «여기가 막히면 저쪽으로» 가 성립한다.
+ *
+ * ## 왜 열 대인가 — 재서 정했다
+ *
+ * 처음에는 분기점 여섯이었다. 그런데 통로 44개 중 **14개가 사각지대**였다.
+ * 남서쪽(THE LOUNGE·ACCEL LAB 앞)과 남동쪽(OPEN OFFICE·WELCOME)이 통째로
+ * 비어서, 거기에 불을 놓으면 감지기가 하나도 안 울린다. 시연에서 그 자리를
+ * 누르면 «감지기가 고장났나» 로 보인다.
+ *
+ * 비상구 셋과 OPEN OFFICE 를 더해 **44개 중 43개**가 잡힌다. 남는 하나는
+ * MR(회의실) 둘을 잇는 통로인데, 방과 방 사이라 복도 감지기의 몫이 아니다.
+ *
+ * 비상구에 다는 것은 현실과도 맞는다 — 계단 앞은 사람이 모이는 곳이라
+ * 실제 건물에서도 감지기가 반드시 붙는다.
  *
  * 도면에 없는 지점은 조용히 건너뛴다. 다른 건물 도면을 올렸을 때 서버가
  * 죽으면 안 되고, 그 도면에는 그 도면의 분기점이 있을 것이다.
@@ -54,6 +71,11 @@ export const HEAT_SPOTS = [
   { id: 'SIM-HEAT-SS1', nodeId: 'J_SS1', label: 'SOUTH STREET 서쪽' },
   { id: 'SIM-HEAT-SS2', nodeId: 'J_SS2', label: 'SOUTH STREET 동쪽' },
   { id: 'SIM-HEAT-ELE', nodeId: 'ELEWAY', label: '엘리베이터 앞' },
+  // 사각지대를 메우는 넷
+  { id: 'SIM-HEAT-EXIT-PT', nodeId: 'EXIT_POINT', label: '비상구 (THE POINT)' },
+  { id: 'SIM-HEAT-EXIT-SM', nodeId: 'EXIT_SEMINAR', label: '비상구 (THE SEMINAR)' },
+  { id: 'SIM-HEAT-EXIT-CW', nodeId: 'EXIT_CW', label: '비상구 (CREATIVE WORKSPACE)' },
+  { id: 'SIM-HEAT-OPEN', nodeId: 'R_OPENOFFICE', label: 'OPEN OFFICE' },
 ];
 
 /** 평상시 실내 온도(℃) */
