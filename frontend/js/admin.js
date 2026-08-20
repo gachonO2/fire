@@ -16,6 +16,7 @@ import { renderMap, temperatureColor } from './minimap.js';
 import { WalkGrid, findPath } from '../shared/walk-grid.js';
 import { TEMP } from '../shared/hazard-rules.js';
 import { PHOTO_SCENARIO, isPhotoScenario } from '../shared/photo-scenario.js';
+import { SPREAD, spreadLabel, spreadProgress, spreadRadius } from '../shared/hazard-spread.js';
 
 const $ = id => document.getElementById(id);
 
@@ -152,6 +153,8 @@ async function main() {
     hazards = h;
     syncPhotoScenarioButton();
     draw();
+    // 불의 크기는 서버가 아니라 흐른 시간이 정한다 — 초시계를 켜 둔다.
+    tickSpread();
     renderSummary();
   });
 
@@ -271,6 +274,7 @@ function draw() {
   updateBeaconChrome();
   drawRooms();
   drawRoutes();
+  drawHazards();
   drawPhotoScenario();
   drawPicks();
   drawWalls();
@@ -337,6 +341,168 @@ function applyTool({ edge, node }) {
     ? api.clearHazard(edge.id)
     : api.setHazard(edge.id, currentTool);
   req.catch(showError);
+}
+
+/**
+ * 불과 연기를 **번지는 것으로** 그린다.
+ *
+ * ## 왜 새 레이어인가
+ *
+ * 이전에는 위험을 «통로 선을 빨갛게» 로만 표시했다. 그런데 관제는 통로
+ * 그래프를 꺼 둔 채로 보므로(방과 벽이 이미 공간을 말해 주니까), 화재를
+ * 넣어도 화면에 얇은 빨간 점선 하나가 생길 뿐이었다. 사용자가 «화재 누르고
+ * 방을 눌렀는데 불이 안 생긴다» 고 한 것의 절반이 이것이다 — 들어가긴
+ * 했는데 보이지 않았다.
+ *
+ * ## 왜 시간이 필요한가
+ *
+ * 고정 크기 빨간 원은 «저기 불» 까지만 말한다. 관제가 정작 정해야 하는 것은
+ * «어느 쪽을 먼저 끊나» 이고, 그건 어느 불이 더 오래 탔는지를 봐야 안다.
+ * 서버가 `updatedAt` 을 이미 주므로 크기를 거기서 계산한다
+ * (`shared/hazard-spread.js`).
+ *
+ * ## 왜 동그라미가 아닌가
+ *
+ * 완전한 원은 «시스템이 표시한 마커» 로 읽히고, 불로는 안 읽힌다. 가장자리를
+ * `feTurbulence` 로 흔들어 놓으면 같은 원 세 개로도 불꽃처럼 보인다. 그림
+ * 파일도, 라이브러리도 필요 없다.
+ */
+function drawHazards() {
+  const svg = document.getElementById('hazard-layer');
+  const base = document.getElementById('admin-map');
+  const plan = api.floorPlan;
+  if (!svg || !base || !plan) return;
+  const vb = base.getAttribute('viewBox');
+  if (!vb) { svg.innerHTML = ''; return; }
+  svg.setAttribute('viewBox', vb);
+
+  const entries = Object.entries(hazards || {})
+    .filter(([, h]) => h && h.type && h.type !== 'clear');
+  if (!entries.length) { svg.innerHTML = ''; return; }
+
+  const u = Number(vb.split(/\s+/)[2]) / 400;
+  const now = Date.now();
+  const parts = [];
+  const defs = [];
+
+  entries.forEach(([edgeId, h], i) => {
+    const at = hazardCenter(edgeId);
+    if (!at) return;
+    const type = SPREAD[h.type] ? h.type : 'fire';
+    const elapsed = now - (h.updatedAt ?? now);
+    const r = spreadRadius(elapsed, type) * u;
+    const rMax = SPREAD[type].rMax * u;
+    const c = HAZARD_TINT[type] || HAZARD_TINT.fire;
+    const gid = `hzg-${i}`;
+
+    // **가장자리는 그라디언트로 흐린다 — 필터를 쓰지 않는다.**
+    //
+    // 처음엔 `feTurbulence` + `feDisplacementMap` 으로 윤곽을 흔들었다.
+    // 불처럼 보이라고 넣은 것인데, 변위 폭이 커지자 필터 영역이 통째로
+    // 칠해져 **빨간 네모**가 나왔고 연기는 구슬 목걸이처럼 늘어졌다.
+    // 가운데가 밝고 밖으로 갈수록 사라지는 방사 그라디언트면 필터 없이도
+    // «면» 이 아니라 «피어오르는 것» 으로 읽힌다. 값도 훨씬 싸다.
+    defs.push(`
+      <radialGradient id="${gid}">
+        <stop offset="0%"   stop-color="${c.core}"  stop-opacity="${c.a0}"/>
+        <stop offset="42%"  stop-color="${c.mid}"   stop-opacity="${c.a1}"/>
+        <stop offset="78%"  stop-color="${c.outer}" stop-opacity="${c.a2}"/>
+        <stop offset="100%" stop-color="${c.outer}" stop-opacity="0"/>
+      </radialGradient>`);
+
+    // 본체 하나 + 혓바닥 다섯. 혓바닥은 각자 다른 박자로 커졌다 작아져서
+    // 윤곽이 매 순간 달라진다 — 정지한 원 하나면 «표식» 이지만, 서로 어긋나게
+    // 뛰는 덩어리는 «번지는 것» 으로 보인다.
+    parts.push(`<circle cx="${at.x}" cy="${at.y}" r="${r.toFixed(2)}" fill="url(#${gid})">
+      <animate attributeName="r" values="${(r * .94).toFixed(2)};${(r * 1.06).toFixed(2)};${(r * .94).toFixed(2)}"
+        dur="${(3.1 + i * .4).toFixed(1)}s" repeatCount="indefinite"/>
+    </circle>`);
+
+    for (let k = 0; k < 5; k++) {
+      const a = (k / 5) * Math.PI * 2 + i;
+      const d = r * 0.46;
+      const rr = r * (0.36 + 0.1 * ((k * 7 + i * 3) % 4) / 3);
+      parts.push(`<circle cx="${(at.x + Math.cos(a) * d).toFixed(2)}"
+        cy="${(at.y + Math.sin(a) * d).toFixed(2)}" r="${rr.toFixed(2)}" fill="url(#${gid})">
+        <animate attributeName="r" values="${(rr * .55).toFixed(2)};${(rr * 1.15).toFixed(2)};${(rr * .55).toFixed(2)}"
+          dur="${(1.7 + k * .43 + i * .2).toFixed(2)}s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values=".45;.95;.45"
+          dur="${(2.2 + k * .31).toFixed(2)}s" repeatCount="indefinite"/>
+      </circle>`);
+    }
+
+    // **번짐의 끝**을 점선으로 미리 그린다. 지금 크기만 보이면 «여기까지만
+    // 위험» 으로 읽히는데, 다 크면 어디까지 가는지가 대피 계획의 근거다.
+    parts.push(`
+      <circle cx="${at.x}" cy="${at.y}" r="${rMax.toFixed(2)}" fill="none"
+        stroke="${c.core}" stroke-opacity=".4" stroke-width="${(u * .5).toFixed(2)}"
+        stroke-dasharray="${(u * 2).toFixed(2)} ${(u * 2.6).toFixed(2)}">
+        <animateTransform attributeName="transform" type="rotate"
+          from="0 ${at.x} ${at.y}" to="360 ${at.x} ${at.y}" dur="26s" repeatCount="indefinite"/>
+      </circle>`);
+
+    // 몇 초째 번지는 중인지 — 관제가 «어느 쪽을 먼저 끊나» 를 정하는 값이다.
+    parts.push(`
+      <text x="${at.x}" y="${(at.y - rMax - u * 1.6).toFixed(2)}" text-anchor="middle"
+        font-size="${(u * 4.4).toFixed(2)}" font-weight="700" fill="${c.core}"
+        paint-order="stroke" stroke="rgba(8,10,14,.85)" stroke-width="${(u * 1.1).toFixed(2)}"
+        >${HAZARD_WORD[type] || '차단'} · ${spreadLabel(elapsed, type)}</text>`);
+  });
+
+  svg.innerHTML = `<defs>${defs.join('')}</defs>${parts.join('')}`;
+}
+
+/**
+ * 세 겹의 색과 불투명도.
+ *
+ * 연기를 «회색» 으로만 두면 어두운 판 위에서 사라진다 — 관제 배경이 짙은
+ * 남색이라 중간 회색은 배경과 명도가 거의 같다. 사람을 먼저 잡는 것이
+ * 연기인데 화면에서 제일 안 보이면 안 되므로, 밝은 쪽으로 올리고 불투명도도
+ * 불보다 높게 준다.
+ */
+const HAZARD_TINT = {
+  fire:  { core: '#ffd166', mid: '#ff5a2b', outer: '#7a1208', a0: .95, a1: .62, a2: .3 },
+  smoke: { core: '#eef3f8', mid: '#a8b3c0', outer: '#5b6572', a0: .9,  a1: .58, a2: .3 },
+  crowd: { core: '#ffd79a', mid: '#e79a3c', outer: '#6b4a10', a0: .9,  a1: .5,  a2: .22 },
+  temp:  { core: '#ffcf9a', mid: '#ff8a3c', outer: '#7a3a08', a0: .9,  a1: .55, a2: .26 },
+};
+const HAZARD_WORD = { fire: '화재', smoke: '연기', crowd: '혼잡', temp: '고온' };
+
+/**
+ * 위험이 «어디에» 있는가.
+ *
+ * 기본은 통로의 가운데다. 다만 사진 시나리오의 불은 사용자가 사진에 직접
+ * 찍어 준 자리가 있으므로 그것을 우선한다 — 통로 중점으로 옮기면 사용자가
+ * 그린 그림과 화면이 어긋난다.
+ */
+function hazardCenter(edgeId) {
+  if (edgeId === PHOTO_SCENARIO.fireEdgeId && api.floorPlan?.id === PHOTO_SCENARIO.planId) {
+    return { x: PHOTO_SCENARIO.fire[0], y: PHOTO_SCENARIO.fire[1] };
+  }
+  const plan = api.floorPlan;
+  const edge = plan?.edges?.find(e => e.id === edgeId);
+  if (!edge) return null;
+  const find = id => plan.getNode?.(id) ?? plan.nodes.find(n => n.id === id);
+  const a = find(edge.a);
+  const b = find(edge.b);
+  if (!a || !b) return null;
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
+/**
+ * 번짐은 **시계가 돌아야 보인다.**
+ *
+ * 다른 그리기는 서버가 무언가 보낼 때만 다시 돈다. 그런데 불의 크기는
+ * 서버가 아니라 흐른 시간이 정하므로, 아무 소식이 없어도 초마다 다시
+ * 그려야 «커지고 있다» 가 화면에 나온다. 위험이 하나도 없으면 멈춘다 —
+ * 아무 일도 없는 화면에서 초당 한 번씩 SVG 를 새로 만들 이유가 없다.
+ */
+let spreadTimer = null;
+function tickSpread() {
+  const any = Object.values(hazards || {}).some(h => h?.type && h.type !== 'clear');
+  const tick = () => { drawHazards(); drawRooms(); };
+  if (any && !spreadTimer) spreadTimer = setInterval(tick, 1000);
+  else if (!any && spreadTimer) { clearInterval(spreadTimer); spreadTimer = null; }
 }
 
 function photoScenarioPosition() {
@@ -994,7 +1160,6 @@ function drawPhotoScenario() {
   const width = Number(vb.split(/\s+/)[2]);
   const u = width / 400;
   const route = PHOTO_SCENARIO.route.map(([x, y]) => `${x},${y}`).join(' ');
-  const [fx, fy] = PHOTO_SCENARIO.fire;
   const current = photoScenarioPosition();
   const [cx, cy] = Number.isFinite(current?.x) && Number.isFinite(current?.y)
     ? [current.x, current.y]
@@ -1003,10 +1168,6 @@ function drawPhotoScenario() {
 
   svg.innerHTML = `
     <defs>
-      <filter id="photoFireGlow" x="-120%" y="-120%" width="340%" height="340%">
-        <feGaussianBlur stdDeviation="${u * 4.2}" result="blur"/>
-        <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-      </filter>
       <filter id="photoRouteGlow" x="-30%" y="-60%" width="160%" height="220%">
         <feGaussianBlur stdDeviation="${u * 1.4}"/>
       </filter>
@@ -1028,14 +1189,6 @@ function drawPhotoScenario() {
       <animate attributeName="stroke-dashoffset" from="${u * 11}" to="0"
         dur="1.05s" repeatCount="indefinite"/>
     </polyline>
-
-    <g filter="url(#photoFireGlow)">
-      <circle cx="${fx}" cy="${fy}" r="${u * 12}" fill="var(--danger)" fill-opacity=".16"
-        stroke="var(--danger)" stroke-width="${u * 2.4}"/>
-      <circle cx="${fx}" cy="${fy}" r="${u * 5.5}" fill="var(--danger)" fill-opacity=".92"/>
-    </g>
-    <circle cx="${fx}" cy="${fy}" r="${u * 12}" fill="none" stroke="#ffb0a8"
-      stroke-width="${u * .7}" stroke-dasharray="${u * 2.2} ${u * 2.2}"/>
 
     <circle class="photo-current-ring" cx="${cx}" cy="${cy}" r="${u * 6.2}" fill="var(--route)" fill-opacity=".18"
       stroke="var(--route)" stroke-width="${u * 1.5}"/>
@@ -1258,12 +1411,20 @@ function drawRooms() {
   svg.setAttribute('viewBox', vb);
 
   // 지금 어느 방이 위험한가 / 누가 있나
+  // 방마다 **가장 오래 탄 위험의 진행률**을 든다. 방이 처음부터 새빨가면
+  // «막 났다» 와 «5분째» 가 같아 보이고, 그러면 어느 쪽을 먼저 끊을지
+  // 화면만 보고 못 정한다. 불이 자라는 만큼 방도 물든다.
   const hot = new Set();
-  for (const [edgeId] of Object.entries(hazards || {})) {
+  const heat = new Map();
+  const nowMs = Date.now();
+  for (const [edgeId, h] of Object.entries(hazards || {})) {
     const e = api.floorPlan?.edges?.find(x => x.id === edgeId);
+    const grown = spreadProgress(nowMs - (h?.updatedAt ?? nowMs), h?.type || 'fire');
     for (const nid of [e?.a, e?.b]) {
       const r = nodeRoom.get(nid);
-      if (r !== undefined) hot.add(r);
+      if (r === undefined) continue;
+      hot.add(r);
+      heat.set(r, Math.max(heat.get(r) ?? 0, grown));
     }
   }
   hotRooms = hot;
@@ -1276,20 +1437,21 @@ function drawRooms() {
   // 불난 방은 **빛난다.** 색만 바꾸면 «빨간 방» 이지만, 번지는 빛이 붙으면
   // «타고 있는 방» 이 된다 — 관제하는 사람이 화면을 흘깃 봐도 먼저 눈에 든다.
   const u = Number(vb.split(/\s+/)[2]) / 400;
-  const glow = `<filter id="fireGlow" x="-60%" y="-60%" width="220%" height="220%">
-      <feGaussianBlur stdDeviation="${u * 7}" result="b"/>
-      <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>`;
 
   const body = rooms.map((r, i) => {
     const d = r.points.map(([x, y]) => `${x},${y}`).join(' ');
     const fire = hot.has(i);
     const here = busy.has(i);
     if (fire) {
-      return `<g filter="url(#fireGlow)">
-        <polygon points="${d}" fill="var(--danger)" fill-opacity="0.5"/>
-        <polygon points="${d}" fill="none" stroke="#ff7a6b" stroke-width="${u * 2.2}"
-          stroke-opacity="0.95"/>
+      // 0.5 로 꽉 채우면 방이 통째로 «빨간 네모» 가 되고, 그 위에 그린 불
+      // 덩어리가 그 안에 묻힌다. 방은 **어디가 타는 구역인가**만 물들이고,
+      // 불꽃 모양은 위험 레이어에 맡긴다.
+      const g = heat.get(i) ?? 0;
+      const fillOp = (0.07 + 0.2 * g).toFixed(3);
+      return `<g>
+        <polygon points="${d}" fill="var(--danger)" fill-opacity="${fillOp}"/>
+        <polygon points="${d}" fill="none" stroke="#ff7a6b" stroke-width="${u * 1.1}"
+          stroke-opacity="${(0.45 + 0.4 * g).toFixed(2)}"/>
       </g>`;
     }
     if (here) {
@@ -1299,7 +1461,7 @@ function drawRooms() {
     // 평상시 방은 **아주 옅게.** 다 진하면 상태가 생겨도 드러나지 않는다.
     return `<polygon points="${d}" fill="#cfe0f2" fill-opacity="0.05"/>`;
   }).join('');
-  svg.innerHTML = `<defs>${glow}</defs>${body}`;
+  svg.innerHTML = body;
 }
 
 /**
@@ -1491,8 +1653,20 @@ function updateBeaconChrome() {
       ? `비콘 표시 (도면 등록 ${real ? '있음' : '없음'} · 기존 매핑 ${surveyedCount}개 · 경로 가상 ${routeCount}개)`
       : '표시할 비콘이 없습니다 — 도면에 비콘 id 가 없고, 답사로 태그한 지점도 없습니다';
   }
+  // 「전파」는 「비콘 위치」의 하위 스위치가 아니다 — 파동 애니메이션은
+  // **실물 비콘을 등록한 도면에서만** 돈다(위 `startBeaconWaves` 참고).
+  // 답사·가상 비콘만 있는 도면에서 눌러도 켜지게 두면 아무 일도 안 일어나고,
+  // 그러면 사용자는 «버튼이 고장났나» 를 먼저 의심한다. 못 하는 것은 못 한다고
+  // 보이게 두는 편이 낫다.
   const wave = document.getElementById('show-waves');
-  if (wave) { wave.disabled = !any; wave.style.opacity = any ? '' : '.35'; }
+  if (wave) {
+    wave.disabled = !real;
+    wave.style.opacity = real ? '' : '.35';
+    wave.title = real
+      ? '전파 — 비콘에서 퍼지는 파동 (사람이 가까이 있을 때)'
+      : '전파 애니메이션은 도면에 실물 비콘 id 가 등록돼야 돕니다'
+        + ' — 지금은 답사로 태그한 지점과 경로 가상 비콘뿐입니다';
+  }
 
   const legend = document.querySelector('.legend .beacon')?.parentElement;
   if (legend) legend.hidden = !any;
