@@ -525,6 +525,11 @@ function drawSensors() {
     const tint = { ok: '#4d9fff', warn: '#e79a3c', block: '#ff4438' }[state];
     const w = u * 9.4;
     const h = u * 4.6;
+    // **배지를 지점 오른쪽에 붙인다.**
+    //
+    // 밑에 뒀더니 불난 통로의 「화재 · 1분 4초째」 글씨와 겹쳐서, 화면에는
+    // 「화재 · 4초째」 로 읽혔다 — 방금 난 불처럼 보인다. 통로 글씨와 경로는
+    // 세로로 쌓이고 배지는 가로로 비켜서면 서로 안 밟는다.
     // 경보 중이면 테를 두껍게 하고 맥이 뛴다 — 숫자만으로는 여섯 개 중 어느
     // 것이 우는지 흘깃 봐서 안 갈린다.
     const ring = state === 'block'
@@ -537,10 +542,10 @@ function drawSensors() {
     return `${ring}
       <circle cx="${n.x}" cy="${n.y}" r="${u * 1.5}" fill="${tint}"
         stroke="rgba(8,10,14,.9)" stroke-width="${u * 0.5}" opacity="${stale ? 0.45 : 1}"/>
-      <rect x="${n.x - w / 2}" y="${n.y + u * 2}" width="${w}" height="${h}" rx="${u * 1.2}"
+      <rect x="${n.x + u * 2.4}" y="${n.y - h / 2}" width="${w}" height="${h}" rx="${u * 1.2}"
         fill="${tint}" opacity="${stale ? 0.4 : 0.95}"
         stroke="rgba(8,10,14,.75)" stroke-width="${u * 0.4}"/>
-      <text x="${n.x}" y="${n.y + u * 5.25}" text-anchor="middle"
+      <text x="${n.x + u * 2.4 + w / 2}" y="${n.y + u * 1.15}" text-anchor="middle"
         font-size="${u * 3.1}" font-weight="800" fill="#0b0f14"
         >${Math.round(c)}°C${stale ? ' ⚠' : ''}</text>`;
   }).join('');

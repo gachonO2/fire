@@ -223,9 +223,14 @@ export function renderMap(svg, state = {}) {
     // 붉은 글씨라 대비도 없다. 어느 방이 타는지는 **빛나는 면**이 이미
     // 말하고 있고, 통로 id 와 종류는 오른쪽 패널이 적는다.
     // 평면으로 볼 때만 남긴다 — 그때는 도면처럼 읽히므로 쓸모가 있다.
-    if (hazard && showGraph) {
-      label(el, mx, my - s * 0.8, hazardStyle(hazard.type).label,
-        { size: s * 0.95, fill: hazardStyle(hazard.type).color, weight: 700 });
+    //
+    // 그리고 **감지기가 만든 위험에는 글씨를 안 붙인다.** 감지기 하나가
+    // 문턱을 넘으면 그 분기점에 닿은 통로가 한꺼번에 위험이 되는데(여섯
+    // 개까지 간다), 통로마다 「온도 상승」 을 적으면 같은 글씨가 도면에
+    // 여섯 번 찍힌다. 몇 도인지는 감지기 배지가 이미 말하고 있다.
+    if (hazard && showGraph && hazard.source !== 'temperature') {
+      label(el, mx, my - s * 0.8 * labelScale, hazardStyle(hazard.type).label,
+        { size: s * 0.95 * labelScale, fill: hazardStyle(hazard.type).color, weight: 700 });
     }
 
     // 온도 판독값 배지
