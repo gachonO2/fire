@@ -127,6 +127,34 @@ export class Api {
   /** 답사 결과 — 몇 지점을 등록했는지 보여 주는 데 쓴다 */
   getBeaconMap() { return this._fetch('/api/beacon-map'); }
 
+  // ── 걷기 답사 — 출발 찍고, 걷고, 도착 찍는다.
+  //
+  // 폰이 자기 답사를 자기가 만들어야 한다. BLE 식별자는 (기기, 출처)마다
+  // 다른 값이라(안드로이드 MAC, iOS 는 앱 설치마다 리셋) 맥북으로 만든
+  // 답사를 이 폰이 물려받을 수 없기 때문이다.
+  startWalkSurvey(fromNodeId) {
+    return this._fetch('/api/survey/walk/start', {
+      method: 'POST', body: JSON.stringify({ fromNodeId }),
+    });
+  }
+
+  /** `steps` 는 **출발부터 누적된** 걸음 수 — 구간값이면 요청 하나가 유실될 때 뒤가 다 밀린다 */
+  sampleWalkSurvey(steps, readings) {
+    return this._fetch('/api/survey/walk/sample', {
+      method: 'POST', body: JSON.stringify({ steps, readings }),
+    });
+  }
+
+  finishWalkSurvey(toNodeId) {
+    return this._fetch('/api/survey/walk/finish', {
+      method: 'POST', body: JSON.stringify({ toNodeId }),
+    });
+  }
+
+  cancelWalkSurvey() { return this._fetch('/api/survey/walk', { method: 'DELETE' }); }
+
+  getWalkSurvey() { return this._fetch('/api/survey/walk'); }
+
   /**
    * 지자기 재현성 — 한 지점을 한 번 잰 결과를 서버에 더한다.
    *

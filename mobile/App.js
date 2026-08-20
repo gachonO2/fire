@@ -37,6 +37,7 @@ import SubmitScreen from './src/screens/SubmitScreen';
 import GuideScreen from './src/screens/GuideScreen';
 import MagScreen from './src/screens/MagScreen';
 import MagSurveyScreen from './src/screens/MagSurveyScreen';
+import WalkSurveyScreen from './src/screens/WalkSurveyScreen';
 import LiveScreen from './src/screens/LiveScreen';
 import FieldScreen from './src/screens/FieldScreen';
 import { FireServer, mockFireEvent } from './src/fireServer';
@@ -87,6 +88,12 @@ const PHASE = {
   NORTH: 'north',
   // 통로를 걸으며 자기장 무늬를 남기는 화면. 재현성 검사를 통과한 뒤에 쓴다.
   MAGSURVEY: 'magsurvey',
+  // 한 번 걸어서 BLE 답사를 만드는 화면.
+  //
+  // **이 앱 안에 있어야 한다.** BLE 식별자는 (기기, 출처)마다 다른 값이라,
+  // 크롬으로 답사해 놓고 앱으로 안내받으면 매핑이 하나도 안 맞는다.
+  // 답사한 폰과 안내받는 폰이 같아야 그 값이 이어진다.
+  WALKSURVEY: 'walksurvey',
 };
 
 
@@ -276,6 +283,7 @@ export default function App() {
     const to = {
       capture: PHASE.CAPTURE, live: PHASE.LIVE, field: PHASE.FIELD,
       magcheck: PHASE.MAGCHECK, magsurvey: PHASE.MAGSURVEY, north: PHASE.NORTH,
+      walksurvey: PHASE.WALKSURVEY,
     }[key];
     if (to) setPhase(to);
   }, []);
@@ -339,6 +347,10 @@ export default function App() {
 
       {phase === PHASE.MAGSURVEY && (
         <MagSurveyScreen api={api} plan={plan} onClose={backHome} />
+      )}
+
+      {phase === PHASE.WALKSURVEY && (
+        <WalkSurveyScreen api={api} plan={plan} onClose={backHome} />
       )}
 
       {phase === PHASE.LIVE && (

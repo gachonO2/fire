@@ -51,6 +51,7 @@ const TOOLS = [
   { key: 'live', label: '실시간 위치', hint: '전파만으로 위치가 잡히는지 확인합니다' },
   { key: 'field', label: '현장 측정', hint: '보폭·축척·북쪽을 실측합니다' },
   { key: 'magcheck', label: '자기장 확인', hint: '지자기를 측위에 쓸 수 있는지 재봅니다' },
+  { key: 'walksurvey', label: '걷기 답사 (BLE)', hint: '출발·도착만 찍고 한 번 걸으면 전파 지도가 채워집니다' },
   { key: 'magsurvey', label: '자기장 답사', hint: '통로를 걸으며 자기장 무늬를 남깁니다' },
 ];
 

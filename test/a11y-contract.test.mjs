@@ -70,7 +70,7 @@ const BLIND_SCREENS = {
 const TOOL_SCREENS = [
   'CaptureScreen.js', 'ReviewScreen.js', 'SubmitScreen.js',
   'FieldScreen.js', 'LiveScreen.js', 'MagScreen.js', 'MagSurveyScreen.js',
-  'NorthScreen.js',
+  'NorthScreen.js', 'WalkSurveyScreen.js',
 ];
 
 /** 누를 수 있는 것으로 보는 태그 */
