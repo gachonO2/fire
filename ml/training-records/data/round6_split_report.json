@@ -1,0 +1,74 @@
+{
+  "train": {
+    "groups": 350,
+    "images": 350,
+    "box_counts": {
+      "exit": 700,
+      "stair": 350,
+      "elevator": 350,
+      "extinguisher": 530,
+      "hydrant": 515,
+      "you_are_here": 350,
+      "door": 3600,
+      "room": 3600
+    },
+    "positive_images": {
+      "exit": 350,
+      "stair": 350,
+      "elevator": 350,
+      "extinguisher": 350,
+      "hydrant": 350,
+      "you_are_here": 350,
+      "door": 350,
+      "room": 350
+    }
+  },
+  "val": {
+    "groups": 75,
+    "images": 75,
+    "box_counts": {
+      "exit": 150,
+      "stair": 75,
+      "elevator": 75,
+      "extinguisher": 114,
+      "hydrant": 113,
+      "you_are_here": 75,
+      "door": 782,
+      "room": 782
+    },
+    "positive_images": {
+      "exit": 75,
+      "stair": 75,
+      "elevator": 75,
+      "extinguisher": 75,
+      "hydrant": 75,
+      "you_are_here": 75,
+      "door": 75,
+      "room": 75
+    }
+  },
+  "test": {
+    "groups": 75,
+    "images": 75,
+    "box_counts": {
+      "exit": 150,
+      "stair": 75,
+      "elevator": 75,
+      "extinguisher": 113,
+      "hydrant": 115,
+      "you_are_here": 75,
+      "door": 779,
+      "room": 779
+    },
+    "positive_images": {
+      "exit": 75,
+      "stair": 75,
+      "elevator": 75,
+      "extinguisher": 75,
+      "hydrant": 75,
+      "you_are_here": 75,
+      "door": 75,
+      "room": 75
+    }
+  }
+}

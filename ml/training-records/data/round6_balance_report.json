@@ -1,0 +1,13 @@
+{
+  "added_images_by_class": {
+    "exit": 0,
+    "stair": 0,
+    "elevator": 0,
+    "extinguisher": 0,
+    "hydrant": 0,
+    "you_are_here": 0,
+    "door": 0,
+    "room": 0
+  },
+  "final_train_images": 350
+}

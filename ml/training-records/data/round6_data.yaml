@@ -1,0 +1,13 @@
+path: /content/drive/MyDrive/evacuation_yolo/round6_allclass_recall
+train: balanced_train/images
+val: locked_dataset/val/images
+test: locked_dataset/test/images
+names:
+  0: exit
+  1: stair
+  2: elevator
+  3: extinguisher
+  4: hydrant
+  5: you_are_here
+  6: door
+  7: room
