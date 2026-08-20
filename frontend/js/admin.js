@@ -1373,9 +1373,15 @@ function drawSurvey() {
   svg.innerHTML = spots.map(({ nodeId, count: n, virtual, node: fixedNode }) => {
     const node = fixedNode || plan.getNode?.(nodeId) || plan.nodes.find(x => x.id === nodeId);
     if (!node || !Number.isFinite(node.x)) return '';
-    // 신호가 두터울수록 크고 진하게 — 어디가 얇은지가 한눈에 보여야 한다
+    // 신호가 두터울수록 크고 진하게 — 어디가 얇은지가 한눈에 보여야 한다.
+    //
+    // **다만 배경으로 물러나 있어야 한다.** 예전 크기(반지름 3~6u, 무리
+    // 12.6u)는 열감지기 배지보다 훨씬 커서, 불이 난 화면에서도 보라색 링이
+    // 시선을 먼저 가져갔다. 답사 링이 말하는 것은 «여기서 전파를 받아 뒀다»
+    // 라는 지난 일이고, 시연에서 봐야 하는 것은 불·감지기·경로다.
+    // 크기 차이(얇은 곳 vs 두터운 곳)는 그대로 남기고 전체만 줄인다.
     const w = Math.min(1, n / 6);
-    const r = u * (3 + w * 3);
+    const r = u * (1.5 + w * 1.5);
     const weak = n <= 2;
     // 답사 지점은 **보라**(--beacon)다. 예전에는 민트였는데 출구도 민트라서
     // 지도에서 «저 점이 출구인가 답사 지점인가» 가 안 갈렸다.
@@ -1387,15 +1393,15 @@ function drawSurvey() {
       ? `${reading.rssi} dBm` : '';
     const source = virtual ? '경로 가상 비콘' : '기존 매핑';
     return `<g class="survey-beacon" data-survey-node="${nodeId}" data-virtual="${virtual}">
-      <circle cx="${node.x}" cy="${node.y}" r="${r * 2.1}" fill="${c}" opacity="${0.08 + w * 0.10}"/>
+      <circle cx="${node.x}" cy="${node.y}" r="${r * 1.7}" fill="${c}" opacity="${0.05 + w * 0.06}"/>
       <circle cx="${node.x}" cy="${node.y}" r="${r}" fill="none" stroke="${c}"
-        stroke-width="${u * 0.9}" opacity="${0.5 + w * 0.45}"/>
-      <text x="${node.x}" y="${node.y + u * 1.3}" text-anchor="middle"
-        font-size="${u * 3.4}" font-weight="700" fill="${c}"
-        paint-order="stroke" stroke="#fff" stroke-width="${u}">${n}</text>
-      ${value ? `<text x="${node.x}" y="${node.y - r * 1.45}" text-anchor="middle"
-        font-size="${u * 3.1}" font-weight="800" fill="#e4bdff"
-        paint-order="stroke" stroke="#111820" stroke-width="${u}">${value}</text>` : ''}
+        stroke-width="${u * 0.55}" opacity="${0.4 + w * 0.35}"/>
+      <text x="${node.x}" y="${node.y + u * 0.75}" text-anchor="middle"
+        font-size="${u * 2}" font-weight="700" fill="${c}"
+        paint-order="stroke" stroke="#fff" stroke-width="${u * 0.55}">${n}</text>
+      ${value ? `<text x="${node.x}" y="${node.y - r * 1.8}" text-anchor="middle"
+        font-size="${u * 2.6}" font-weight="800" fill="#e4bdff"
+        paint-order="stroke" stroke="#111820" stroke-width="${u * 0.8}">${value}</text>` : ''}
       <title>${node.name} · ${source} ${n}개${value ? ` · ${value} 시뮬레이션` : ''}</title>
     </g>`;
   }).join('');
