@@ -292,8 +292,19 @@
       position: absolute; left: 0; top: 0; display: grid; place-items: center;
       width: var(--size, var(--sw)); height: var(--size, var(--sh));
       transform-origin: 50% 100%;
+      /* **표지판은 늘 이쪽을 본다 (빌보드).**
+
+         전에는 `rotateX(-90deg)` 로 바닥에서 수직으로 세웠다. 그러면 판을
+         46도 눕힌 상태에서 표지판도 같이 44도 누워, 초록 판이 마름모로
+         찌그러진다. Shift 로 돌리면 더 나빠서 — 어느 각도에서는 옆면만
+         남아 선 하나로 사라진다. 매일 천장에서 보던 그 표지판으로 읽히려면
+         **각도와 상관없이 같은 모양**이어야 한다.
+
+         그래서 무대가 건 회전(`rotateX(tilt) rotateZ(spin)`)을 **역순으로
+         되돌린다**. 위치는 바닥 좌표에 그대로 박혀 있고 판만 화면을 향한다. */
       transform: translate3d(calc(var(--x) - var(--size, var(--sw)) / 2), calc(var(--y) - var(--size, var(--sh))), 0)
-                 rotateX(-90deg);
+                 rotateZ(calc(var(--spin, 0deg) * -1))
+                 rotateX(calc(var(--tilt, 46deg) * -1));
       background: #00b879;
       border: 1px solid #73f0c7; border-radius: 3px;
       box-shadow: 0 0 10px rgba(47,214,166,.75), 0 0 26px rgba(47,214,166,.35);
@@ -302,12 +313,8 @@
       border-width: 2px;
       box-shadow: 0 0 14px rgba(47,214,166,1), 0 0 34px rgba(47,214,166,.7);
     }
-    /* 표지판을 늘 정면으로 세운다 — 판을 돌려도 글자가 뒤집히지 않게
-       회전 반대 방향으로 되돌린다(빌보드). */
-    .signs b svg {
-      width: 100%; height: 100%; display: block;
-      transform: rotateZ(calc(var(--spin, 0deg) * -1));
-    }
+    /* 판 자체가 이미 빌보드라, 안쪽 그림은 되돌릴 것이 없다. */
+    .signs b svg { width: 100%; height: 100%; display: block; }
     .ops-body[data-view="flat"] .signs { opacity: 0; }
     .signs { transition: opacity .3s ease; }
 
@@ -811,8 +818,14 @@
         <button id="show-beacons" role="switch" aria-pressed="true"  title="비콘 위치" aria-label="비콘 위치"><svg viewBox="0 0 16 16"><use href="#i-beacon"/></svg></button>
         <button id="show-waves"   role="switch" aria-pressed="true"  title="전파" aria-label="전파"><svg viewBox="0 0 16 16"><use href="#i-wave"/></svg></button>
         <button id="show-range"   role="switch" aria-pressed="false" title="도달 범위" aria-label="도달 범위"><svg viewBox="0 0 16 16"><use href="#i-range"/></svg></button>
-        <button id="show-graph"   role="switch" aria-pressed="false" title="통로 그래프" aria-label="통로 그래프"><svg viewBox="0 0 16 16"><use href="#i-graph"/></svg></button>
-        <button id="show-corridor" role="switch" aria-pressed="false" title="복도로 인식한 곳" aria-label="복도로 인식한 곳"><svg viewBox="0 0 16 16"><use href="#i-floor"/></svg></button>
+        <!-- 이 둘은 이름이 겹치면 안 된다. 「통로 그래프」와 「통로로 인식한 곳」
+             둘 다 «통로» 라 같은 것의 두 모습으로 읽혔는데, 실제로는 층이
+             다르다 — 하나는 **어디와 어디가 이어졌나**(지점 42·연결 44,
+             도면 판독기가 만든 이름 있는 그래프), 다른 하나는 **어디를 밟을
+             수 있나**(3587칸, 사진에서 뽑은 이름 없는 격자)다. 화재는 앞의
+             것에 붙고, 파란 선의 모양은 뒤의 것이 정한다. -->
+        <button id="show-graph"   role="switch" aria-pressed="false" title="지점과 연결 — 방·교차점·출구 42곳이 어떻게 이어져 있나 (화재는 이 연결에 붙는다)" aria-label="지점과 연결"><svg viewBox="0 0 16 16"><use href="#i-graph"/></svg></button>
+        <button id="show-corridor" role="switch" aria-pressed="false" title="걸을 수 있는 바닥 — 도면 사진에서 뽑은 3587칸. 대피선이 벽을 안 뚫도록 이 위로만 지난다" aria-label="걸을 수 있는 바닥"><svg viewBox="0 0 16 16"><use href="#i-floor"/></svg></button>
         <hr />
         <button id="btn-view" role="switch" aria-pressed="true" title="평면 ↔ 입체" aria-label="평면 또는 입체"><svg viewBox="0 0 16 16"><use href="#i-flat"/></svg></button>
         <button id="btn-fit" title="시점 초기화" aria-label="시점 초기화"><svg viewBox="0 0 16 16"><use href="#i-fit"/></svg></button>
