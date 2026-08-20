@@ -489,16 +489,16 @@
     <p class="lede">벽에 걸린 피난안내도 사진 한 장에서 비상구·계단·소화기를 찾아, 대피 경로 그래프의 좌표로 옮겨 적는 YOLO 탐지기. 학습 데이터, 검증 지표, 실제 사진에서의 거동을 모았다.</p>
     <div class="stamp">
       <span>YOLO11n · 8 클래스</span>
-      <span>합성 100장 사전학습 → 실촬 이어학습</span>
-      <span>측정일 2026-08-20</span>
+      <span>합성 사전학습 → 실제 도면 사람검수 라벨 → 합성으로 균형 보정</span>
+      <span>측정일 2026-08-21</span>
     </div>
   </header>
 
   <div class="kpis" style="margin-top:2.5rem">
     <div class="kpi"><b>8</b><span>탐지 클래스<small>비상구·계단·승강기·소화기·소화전·현위치·문·실</small></span></div>
-    <div class="kpi"><b>3,142</b><span>학습 라벨 상자<small>합성 도면 100장 · 장당 31개</small></span></div>
+    <div class="kpi"><b>3,142</b><span>1부 학습 라벨 상자<small>합성 100장 · 장당 31개<br>라운드 6은 500장 · 14,322개</small></span></div>
     <div class="kpi"><b>1.000</b><span>검증 재현율 (8클래스 중 6)<small>나머지 2개도 0.991</small></span></div>
-    <div class="kpi"><b>1.5초</b><span>사진 한 장 추론<small>CPU · 1280px · 모델 2벌 합산</small></span></div>
+    <div class="kpi"><b>1.2초</b><span>사진 한 장 추론<small>CPU · 1280px · 모델 3벌 합산</small></span></div>
   </div>
 
   <!-- ============================================ 왜 -->
@@ -532,6 +532,10 @@
     <div class="sec-head"><span class="tag">학습 데이터</span><h2>합성 도면 100장을 직접 그려서 만들었다</h2></div>
 
     <p>도면을 <strong>먼저 그리고</strong> 그리는 순간의 좌표를 그대로 정답으로 적는 방식이라 라벨 오차가 0이다. 사전학습용으로는 이 성질이 중요하다 — 실제 사진 100장에 밑라벨을 깔아 줄 모델이 애매한 라벨로 배우면 밑라벨도 애매해지고, 사람이 고칠 것이 늘어난다.</p>
+
+    <div class="note">
+      <p><strong>이 100장은 1부(사전학습) 데이터셋이다.</strong> 지금 서비스에 붙어 있는 가중치는 여기서 출발했지만, 마지막 학습(라운드 6)에서는 같은 방식으로 만든 <b>500장</b>(학습 350 · 검증 75 · 시험 75)을 썼다. 뒤에 나오는 클래스별 지표는 그 500장 기준이다. 생성기는 <code>ml/generate_dataset.py</code>에 있다.</p>
+    </div>
 
     <div class="scroller">
       <table>
@@ -578,27 +582,44 @@
 
   <!-- ============================================ 학습 -->
   <section>
-    <div class="sec-head"><span class="tag">학습 절차</span><h2>합성으로 눈을 뜨고, 실촬로 현장에 맞춘다</h2></div>
+    <div class="sec-head"><span class="tag">학습 절차</span><h2>합성으로 눈을 뜨고, 실제 도면으로 다듬는다</h2></div>
 
-    <p>합성 도면은 배치와 기호 규칙까지는 실제와 같지만 종이 질감·유리 반사·형광등 빛·비스듬한 각도를 흉내내지 못한다. 그래서 1부만 돌린 모델은 실제 사진에서 성능이 떨어진다. <strong>1부는 2부의 라벨링 시간을 17시간에서 3시간으로 줄이기 위한 발판이다</strong> — 실제 100장을 맨손으로 라벨링하면 장당 30개씩 3,000개를 찍어야 하지만, 1부 모델이 밑라벨을 깔아 주면 사람은 틀린 것만 고친다.</p>
+    <p>합성 도면은 배치와 기호 규칙까지는 실제와 같지만 종이 질감·유리 반사·형광등 빛·비스듬한 각도를 흉내내지 못한다. 그래서 합성으로 눈을 뜨게 한 뒤, <strong>실제 대피안내도를 모아 사람이 검수한 라벨로 이어학습</strong>했다. 다만 마지막 라운드는 클래스 균형을 맞추려고 다시 합성으로 돌아갔다 — 그래서 지표를 읽는 법이 달라진다.</p>
+
+    <div class="note warn">
+      <p><strong>지표는 합성 검증셋에서 잰 값이다.</strong> 실제 도면은 라운드 2~4의 학습에 들어갔지만(사람이 검수한 라벨), <b>마지막 라운드 6의 학습·검증 500장은 전부 합성</b>이다 — 검증 75장 하나하나에 8클래스가 정확히 같은 개수로 들어 있고 문(door)과 실(room) 개수가 딱 일치한다. 생성기의 규칙이지 실제 도면에서 나올 분포가 아니다. <b>뒤에 나오는 재현율 1.000을 실제 사진에서의 성능으로 읽으면 안 된다</b> — 실제 사진에서의 거동은 실측 절에서 따로 잰다.</p>
+    </div>
 
     <div class="stages">
       <div class="stage">
         <div class="idx">1부</div>
         <div>
-          <h4>합성 100장 사전학습</h4>
+          <h4>합성 도면 사전학습</h4>
           <p><code>yolo11n</code> · 150 에폭 · <code>imgsz=800</code> · <code>batch=8</code> · <code>patience=40</code> · 증강 <code>degrees=5.0</code> <code>translate=0.08</code> <code>scale=0.35</code> <code>mosaic=0.7</code> <code>close_mosaic=20</code>. 좌우·상하 뒤집기는 <b>껐다</b> — 도면을 뒤집으면 글자가 거울상이 되어 실제로는 없는 그림을 배운다. T4 기준 20~30분.</p>
         </div>
       </div>
       <div class="stage">
         <div class="idx">2부</div>
         <div>
-          <h4>실제 피난안내도 이어학습</h4>
-          <p>같은 안내도를 각도·거리·조명을 바꿔 3~4장씩 찍어 모은다(유리 반사가 든 사진도 일부러 남긴다). 1부 모델로 밑라벨을 깔고 사람이 검수한 뒤, 1부 가중치에서 출발해 <code>lr0=0.002</code> · 60 에폭. <b>점수는 실제 사진만 모은 검증 목록으로 다시 잰다</b> — 합성이 섞인 점수는 실제 성능보다 항상 높게 나온다.</p>
+          <h4>라운드를 거듭하며 조여 나간다</h4>
+          <p>1부 가중치를 한 번에 완성시키지 않고, 앞 라운드 결과를 받아 <b>학습률과 증강을 조금씩 낮추며</b> 다섯 번에 나눠 이어학습했다. 이어학습에서 크게 흔들면 앞 단계가 배운 것이 흐려지기 때문이다. 아래 값은 <code>ml/training-records/*/args.yaml</code>에 남은 실제 설정이다.</p>
+          <div class="scroller">
+            <table>
+              <thead><tr><th>라운드</th><th class="wrap-cell">학습 데이터</th><th class="num">lr0</th><th class="num">에폭</th><th class="num">imgsz</th><th>낸 가중치</th></tr></thead>
+              <tbody>
+                <tr><td>2 stage_a</td><td class="wrap-cell">실제 대피안내도 + <b>사람 검수 라벨</b></td><td class="num">0.0008</td><td class="num">50</td><td class="num">960</td><td></td></tr>
+                <tr><td>4 stage_a</td><td class="wrap-cell">라운드 2 사람검수 라벨 + 계단 보강 합성</td><td class="num">0.0005</td><td class="num">25</td><td class="num">768</td><td></td></tr>
+                <tr><td>4 stage_b</td><td class="wrap-cell">위와 같음</td><td class="num">0.00015</td><td class="num">35</td><td class="num">768</td><td><code>round2_best.pt</code></td></tr>
+                <tr><td>6 stage_a</td><td class="wrap-cell">합성 500장 (전 클래스 균형)</td><td class="num">0.001</td><td class="num">18</td><td class="num">896</td><td><code>stage_a_best.pt</code></td></tr>
+                <tr><td>6 stage_b</td><td class="wrap-cell">위와 같음</td><td class="num">0.0002</td><td class="num">30</td><td class="num">896</td><td><code>stage_b_best.pt</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>라운드 3에서 공개 라이선스 실제 대피안내도를 더 모았고, 갈래가 둘이었다 — 사람이 검수한 <code>critical</code>과 자동 pseudo-label만 쓴 <code>auto</code>다. 노트북이 직접 적어 두었듯 <b>auto 갈래의 점수는 검증셋마저 자동 라벨이라 참고값</b>이다. 라운드 5는 비상구 재현율만 따로 올려 보려던 갈래인데 라운드 6이 그 역할을 대신해 서비스에는 쓰지 않았다. 기록은 모두 <code>ml/training-records/</code>에 남겨 두었다.</p>
         </div>
       </div>
       <div class="stage">
-        <div class="idx">라운드</div>
+        <div class="idx">분리</div>
         <div>
           <h4>클래스를 나눠 여러 벌로</h4>
           <p>한 벌로 여덟 종류를 다 학습시켰더니 일부 클래스가 서로를 잡아먹었다. 그래서 라운드를 나눠 학습시키고 <b>각 라운드가 자신 있는 클래스만</b> 맡는다. 결과를 합친 뒤 클래스별 NMS(IoU 0.5)로 중복을 정리한다.</p>
@@ -609,6 +630,33 @@
     <div class="note warn">
       <p><strong>클래스 순서 0~7은 모든 모델이 같아야 한다.</strong> 순서가 한 칸 밀리면 "비상구"라고 찍은 것이 실제로는 "소화기"가 되고, 그 오류는 도면이 저장된 뒤에야 드러난다. 그래서 서비스가 뜰 때 순서를 검사하고, 어긋나면 아예 뜨지 않는다.</p>
     </div>
+
+    <h3>실제로 서비스에 붙은 가중치 세 벌은 이렇게 학습됐다</h3>
+
+    <p>아래는 <strong>가중치 파일 안에 저장된 <code>train_args</code>를 그대로 읽은 값</strong>이고, <code>ml/training-records/</code>의 <code>args.yaml</code>과 11개 항목이 전부 일치하는 것을 확인했다. 학습 노트북도 <code>ml/notebooks/</code>에 있으므로 어느 실행이 어느 가중치를 냈는지까지 따라갈 수 있다.</p>
+
+    <div class="scroller">
+      <table>
+        <thead>
+          <tr>
+            <th>가중치</th><th>이어받은 곳</th>
+            <th class="num">에폭</th><th class="num">imgsz</th><th class="num">lr0</th>
+            <th class="num">동결</th><th class="num">mosaic</th><th class="num">fliplr</th><th>학습일</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>round2_best.pt</code></td><td>round4 <code>stage_a</code></td><td class="num">35</td><td class="num">768</td><td class="num">0.00015</td><td class="num">0</td><td class="num">1.0</td><td class="num">0.5</td><td>2026-08-17</td></tr>
+          <tr><td><code>stage_a_best.pt</code></td><td><code>round2_best.pt</code></td><td class="num">18</td><td class="num">896</td><td class="num">0.001</td><td class="num">10</td><td class="num">0.2</td><td class="num">0.15</td><td>2026-08-18</td></tr>
+          <tr><td><code>stage_b_best.pt</code></td><td><code>stage_a_best.pt</code></td><td class="num">30</td><td class="num">896</td><td class="num">0.0002</td><td class="num">0</td><td class="num">0.1</td><td class="num">0.1</td><td>2026-08-18</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>세 벌 모두 <code>yolo11n</code> 구조(파라미터 2,591,400개)에 <code>nc=8</code>이고, 앞 단계 가중치를 이어받아 학습됐다. 뒤로 갈수록 학습률과 증강을 줄이는데, 이어학습에서 증강을 세게 두면 앞 단계가 배운 것이 흐려지기 때문이다.</p>
+
+    <div class="note warn">
+      <p><strong>좌우 뒤집기가 어느 라운드에서 되살아났다.</strong> 1부 노트북에는 <code>fliplr=0.0</code>이 이유까지 주석으로 적혀 있는데, 서비스에 붙은 세 벌은 모두 켜져 있다(0.5 · 0.15 · 0.1). 노트북을 따라가 보면 원칙을 뒤집은 것이 아니라 <b>라운드 4에서 이 한 줄을 빠뜨려 Ultralytics 기본값 <code>0.5</code>가 되살아난 것</b>이었다(라운드 3까지는 <code>0.0</code> 명시, 라운드 6은 <code>.15</code>·<code>.10</code>으로 적었으나 0으로 되돌리지 않음). 도면을 좌우로 뒤집으면 글자가 거울상이 되므로 끄는 쪽이 맞다. 상하 뒤집기(<code>flipud</code>)는 세 벌 모두 0이다. <b>다음 학습에서는 기본값에 기대지 말고 명시해야 한다</b> — 기본값에 기댔기 때문에 이 일이 났다.</p>
+    </div>
   </section>
 
   <!-- ============================================ 라우터 -->
@@ -616,6 +664,8 @@
     <div class="sec-head"><span class="tag">라운드 6</span><h2>클래스별로 담당 모델을 배정했다</h2></div>
 
     <p>최신 학습(라운드 6)에서는 모델 세 벌을 놓고 <strong>클래스마다 가장 잘하는 한 벌을 골라</strong> 라우팅 표로 굳혔다. 확신도 문턱은 전 클래스 공통 0.75다.</p>
+
+    <p><strong>이 표가 지금 서비스에 붙어 있는 것 그대로다.</strong> 배정을 코드에 박지 않고 <code>ml/detector/models/class_router.json</code>을 읽어 따르게 했다 — 재학습으로 담당이 바뀌었는데 파이썬 상수를 같이 고치는 걸 잊으면, 서비스는 멀쩡히 뜨고 틀린 모델이 낸 결과가 그대로 편집기로 간다. 그 어긋남은 아무도 알아채지 못한다. <code>GET /health</code>가 지금 적용된 담당 표를 그대로 돌려준다.</p>
 
     <div class="scroller">
       <table>
@@ -646,7 +696,7 @@
     </div>
 
     <div class="note warn">
-      <p><strong>이 표는 상한으로 읽어야 한다.</strong> 라운드 6 리포트에는 검증·시험 분할의 구성이 담겨 있지 않고, 학습 데이터의 뼈대는 합성 도면이다. 합성이 섞인 점수는 실제 성능보다 항상 높게 나온다 — 실제 사진에서의 거동은 아래 절에서 따로 잰다.</p>
+      <p><strong>이 표는 상한으로 읽어야 한다.</strong> 분할 구성은 이제 저장소에 있다(<code>ml/training-records/data/round6_split_report.json</code>) — 학습 350장 · 검증 75장 · 시험 75장이고, 위 표의 TP+FN 이 그 분할의 상자 수와 <b>8클래스 × 검증·시험 16개 값 전부</b> 맞는다. 다만 <b>그 500장이 모두 합성 도면이다</b> — 검증 75장 하나하나에 8클래스가 빠짐없이 들어 있는데, 실제 촬영본에서는 그런 분포가 나오지 않는다. 합성이 섞인 점수는 실제 성능보다 항상 높게 나온다 — 실제 사진에서의 거동은 아래 절에서 따로 잰다.</p>
     </div>
   </section>
 
@@ -661,13 +711,13 @@
       <table>
         <thead><tr><th>추론 해상도</th><th class="num">탐지 수</th><th class="num">비상구 최고 확신도</th><th class="num">CPU 소요</th></tr></thead>
         <tbody>
-          <tr><td>768 px</td><td class="num">12</td><td class="num">0.529</td><td class="num">0.62초</td></tr>
-          <tr><td><b>1280 px</b> <span class="pill ok">채택</span></td><td class="num">22</td><td class="num"><b>0.864</b></td><td class="num">1.46초</td></tr>
+          <tr><td>768 px</td><td class="num">10</td><td class="num">0.529</td><td class="num">0.41초</td></tr>
+          <tr><td><b>1280 px</b> <span class="pill ok">채택</span></td><td class="num">25</td><td class="num"><b>0.864</b></td><td class="num">1.22초</td></tr>
         </tbody>
       </table>
     </div>
 
-    <p>1920까지 올리면 탐지가 더 늘지만 <code>you_are_here</code> 오탐이 폭발한다(실제 1개 → 21개). 1280이 지금 가중치에서의 균형점이다.</p>
+    <p>1920까지 올리면 탐지가 더 늘지만 <code>you_are_here</code> 오탐이 폭발한다(실제 1개 → 13개). 1280이 지금 가중치에서의 균형점이다.</p>
 
     <h3>모델이 배운 적 없는 것 — 제목과 범례</h3>
     <p>모델은 초록 픽토그램을 찾도록 학습됐고 실제로 잘 찾는다. 문제는 도면에 픽토그램처럼 생긴 것이 세 군데 있다는 점이다: <b>도면 안</b>(우리가 원하는 것), <b>범례</b>("■ 비상구 방향" 같은 설명), <b>제목·초록 띠</b>(초록 바탕이라 통째로 비상구로 잡힌다). 뒤 둘은 모델이 못 배운 것이 아니라 <strong>아무도 가르친 적이 없는 구분</strong>이다.</p>
@@ -676,14 +726,14 @@
 
     <div class="pair">
       <figure>
-        <div class="badge-row"><span class="badge before">걸름망 전</span><span class="badge">탐지 22개</span></div>
+        <div class="badge-row"><span class="badge before">걸름망 전</span><span class="badge">탐지 25개</span></div>
         <img src="figs/detect-draft-1-1.jpg" alt="실제 피난안내도 사진에 원시 탐지 결과를 그린 이미지. 제목 글자와 범례에도 비상구 상자가 잡혀 있다">
         <figcaption>모델이 낸 그대로. 제목 글자 "방향화살표가 없는 피난 안내도"가 통째로 비상구로 잡히고, 왼쪽 범례 칸의 설명용 아이콘이 <b>확신도 0.86</b>으로 도면 안 픽토그램보다 더 세게 잡혔다.</figcaption>
       </figure>
       <figure>
-        <div class="badge-row"><span class="badge after">걸름망 후</span><span class="badge">남은 것 6개</span></div>
+        <div class="badge-row"><span class="badge after">걸름망 후</span><span class="badge">남은 것 10개</span></div>
         <img src="figs/filtered-draft-1-1.jpg" alt="같은 사진에 크기·범례 걸름망을 적용한 뒤의 탐지 결과">
-        <figcaption>크기로 11개, 범례 영역에서 5개를 버려 <b>실제 위치 6개</b>만 남았다 — 비상구 4, 소화전 1, 실 1. 버린 개수와 이유는 편집기에 경고로 함께 뜬다.</figcaption>
+        <figcaption>크기로 11개, 범례 영역에서 4개를 버려 <b>실제 위치 10개</b>가 남았다 — 비상구 4, 소화기 1, 소화전 4, 실 1. 버린 개수와 이유는 편집기에 경고로 함께 뜬다.</figcaption>
       </figure>
     </div>
 
@@ -722,23 +772,28 @@
       </figure>
       <div>
         <ul class="tight">
-          <li><b>도면 양식이 바뀌면 재현율이 떨어진다.</b> 2부 실촬 데이터를 건물 대여섯 곳으로 넓히는 것이 다음 과제다. 비상구 재현율이 0.9 아래인 양식은 현장에 쓰지 않는다.</li>
+          <li><b>도면 양식이 바뀌면 재현율이 떨어진다.</b> 실제 도면을 학습에 넣긴 했지만 <b>원본이 13종뿐</b>이라(그것을 촬영환경별로 208장으로 늘린 것) 학습에 없던 양식은 여전히 약하다 — 위 실패 사례도 기호 양식이 달랐다. 라운드 7에서 공공기관 공개 피난안내도로 원본 수를 늘리고 있고, 사람이 검수해 정답을 확정한 뒤 이어학습하는 것이 다음 과제다. <b>비상구 재현율이 0.9 아래인 양식은 현장에 쓰지 않는다.</b></li>
+          <li><b>마지막 라운드는 합성으로 되돌아갔다.</b> 라운드 6은 클래스 균형을 맞추려고 합성 500장만 썼다. <code>round2_best.pt</code>(비상구·계단·승강기·현위치·실 담당)는 그 앞 라운드의 실제 도면 학습을 물려받았지만, <code>stage_a</code>·<code>stage_b</code>(문·소화기·소화전)의 마지막 조정은 합성에서만 이뤄졌다.</li>
           <li><b>비상계단을 <code>stair</code>로 찍어 온다.</b> 대피 목표가 되는 건 <code>exit</code>뿐이라 그대로 두면 갈 곳이 없어진다. <code>exit</code>이 하나도 없으면 <code>stair</code>를 승격시키되 반드시 경고한다 — 옥상 전용 계단이 섞였을 수 있고 그건 사람만 안다.</li>
           <li><b>축척은 판독하지 않는다.</b> 문 폭으로 어림할 수는 있지만 두 배 틀리면 "8미터 직진"이 16미터가 되어 시각장애인이 모퉁이를 지나친다. 이 숫자 하나는 사람이 직접 넣는다.</li>
-          <li><b>서비스에 붙은 가중치는 아직 라운드 6이 아니다.</b> 현재 <code>ml/detector/models</code>의 두 파일은 SHA-256이 같은 동일 가중치라, 실질적으로 한 벌을 두 번 돌리고 있다. 라운드 6의 <code>stage_a</code>·<code>stage_b</code>와 라우팅 표를 붙이는 것이 바로 다음 작업이다.</li>
+          <li><b>데이터셋 원본 이미지는 여전히 저장소 밖이다.</b> 생성기(<code>ml/generate_dataset.py</code>)가 들어와 <b>같은 시드로 다시 만들 수는</b> 있지만, 라운드 6이 쓴 500장은 그 생성기의 기본값(100장)과 다른 설정으로 만든 것이라 그대로 재현되지 않는다.</li>
+          <li><b>서비스 문턱은 라우팅 표의 0.75가 아니라 0.25다.</b> 위 지표는 문턱 0.75에서 잰 값이지만, 반사광과 기울기가 든 실제 사진은 확신도가 통째로 내려가서 같은 문턱을 대면 실제 비상구가 잘려 나간다. 서비스는 낮게 잡아 많이 건지고 걸러내는 일을 걸름망과 사람에게 맡긴다 — 대신 각 탐지가 검증 문턱을 넘었는지를 <code>aboveThreshold</code>로 함께 내려보낸다. 재현율은 문턱을 낮췄으니 위 값 아래로 내려가지 않지만, <b>정밀도는 위 표보다 낮다.</b></li>
         </ul>
       </div>
     </div>
   </section>
 
   <footer>
-    <p>이 문서의 수치는 저장소에서 직접 뽑아 다시 계산한 것이다.</p>
+    <p>이 문서의 수치는 옮겨 적은 것이 아니라 <strong>다시 계산한 것</strong>이다. 그래도 전부가 저장소만으로 재현되지는 않으니 어느 쪽인지 함께 적는다 — 재현할 수 없는 값을 재현할 수 있는 값과 같은 얼굴로 두면, 나중에 그 숫자를 믿고 재학습하는 사람이 생긴다.</p>
     <ul>
-      <li>클래스 분포·데이터셋 통계 — <code>ml-colab.zip</code>의 라벨 3,142줄을 다시 집계</li>
-      <li>클래스별 지표 — <code>round6_models_for_vscode.zip / allclass_selection_report.json</code></li>
-      <li>학습 설정 — <code>ml/train_colab.ipynb</code></li>
-      <li>실측 탐지·해상도 비교·걸름망 — <code>촬영도면/</code>의 사진으로 2026-08-20 CPU에서 직접 실행</li>
-      <li>걸름망 규칙 — <code>backend/src/planReader/graph.js</code>의 판정을 그대로 옮겨 적용</li>
+      <li><span class="pill ok">재현됨</span> 클래스별 지표 — <code>ml/detector/models/allclass_selection_report.json</code></li>
+      <li><span class="pill ok">재현됨</span> 서비스 가중치의 학습 설정 — <code>ml/detector/models/*.pt</code> 안의 <code>train_args</code>. <code>ml/training-records/*/args.yaml</code>과 11개 항목이 일치함을 확인</li>
+      <li><span class="pill ok">재현됨</span> 라운드별 이어학습 설정과 수렴 — <code>ml/training-records/*/args.yaml</code>과 <code>results.csv</code></li>
+      <li><span class="pill ok">재현됨</span> 라운드 6 분할 구성 — <code>ml/training-records/data/round6_split_report.json</code></li>
+      <li><span class="pill ok">재현됨</span> 1부 학습 설정과 증강값 — <code>ml/train_colab.ipynb</code>. 라운드별 노트북은 <code>ml/notebooks/</code></li>
+      <li><span class="pill ok">재현됨</span> 걸름망 규칙 — <code>backend/src/planReader/graph.js</code>의 판정을 그대로 옮겨 적용</li>
+      <li><span class="pill mid">저장소 밖</span> 클래스 분포·데이터셋 통계 — <code>ml-colab.zip</code>의 라벨 3,142줄을 집계. 생성기(<code>ml/generate_dataset.py</code>)는 들어왔으므로 같은 시드로 다시 만들 수는 있지만, 집계한 그 꾸러미 자체는 <code>.gitignore</code>에 있다</li>
+      <li><span class="pill mid">저장소 밖</span> 실측 탐지·해상도 비교·걸름망 그림 — <code>촬영도면/</code>의 사진으로 2026-08-21 CPU에서 직접 실행. 이 폴더도 <code>.gitignore</code>에 있다(<code>backend/data/plans.json</code>에 박힌 사진들은 <b>다른 건물의 안내도</b>라 대신 쓸 수 없다)</li>
     </ul>
   </footer>
 </div>
