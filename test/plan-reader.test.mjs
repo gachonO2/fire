@@ -137,6 +137,45 @@ const det = (className, x1, y1, x2, y2, confidence = 0.9) =>
   expect('실은 커도 버리지 않는다', nodes.filter(n => n.type === 'room').length === 1);
 }
 
+{
+  // 한 기호를 소화기로도 소화전으로도 잡는 일이 실제로 있다 — 중복 정리는
+  // 탐지기가 클래스별로만 하기 때문이다. 그 둘을 별개로 세면 기호 하나가
+  // "2개 · 2종류"가 되어 범례 판정의 두 조건을 혼자 채우고, 근처의 진짜
+  // 비상구까지 가짜 범례 안에 들어가 버려진다. 실측 도면에서 그렇게 됐다.
+  const overlapping = [
+    det('hydrant',      0.416, 0.510, 0.436, 0.530, 0.42),
+    det('extinguisher', 0.417, 0.509, 0.437, 0.529, 0.51),  // 같은 자리
+    det('exit',         0.455, 0.598, 0.475, 0.618, 0.79),  // 도면 안 진짜 비상구
+  ];
+
+  expect('같은 자리 탐지는 범례 판정에서 하나로 센다',
+    _internal.collapseSameSpot(overlapping).length === 2,
+    `${_internal.collapseSameSpot(overlapping).length}개`);
+  expect('겹친 탐지 셋은 범례가 아니다',
+    _internal.findLegendZones(overlapping).length === 0);
+
+  const { nodes } = nodesFromDetections(overlapping);
+  expect('겹친 탐지 옆의 진짜 비상구를 버리지 않는다',
+    nodes.some(n => n.type === 'exit'),
+    nodes.map(n => n.type).join(','));
+}
+
+{
+  // 위 규칙이 진짜 범례까지 풀어주면 안 된다. 실제 범례는 좁은 세로 띠에
+  // 서로 겹치지 않게 줄지어 있으므로 합쳐지지 않고 그대로 범례로 잡힌다.
+  const legend = [
+    det('exit',    0.135, 0.575, 0.155, 0.595, 0.86),
+    det('exit',    0.135, 0.603, 0.155, 0.623, 0.55),
+    det('exit',    0.135, 0.658, 0.155, 0.678, 0.79),
+    det('hydrant', 0.135, 0.714, 0.155, 0.734, 0.46),
+  ];
+
+  expect('줄지어 선 범례는 여전히 범례로 잡는다',
+    _internal.findLegendZones(legend).length === 1);
+  expect('범례 안의 비상구는 지점이 되지 않는다',
+    !nodesFromDetections(legend).nodes.some(n => n.type === 'exit'));
+}
+
 // ─────────────────────────────────────────────── 선분–사각형 교차
 
 {

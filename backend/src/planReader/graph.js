@@ -78,6 +78,7 @@ const LEGEND_X_TOL = 0.05;    // 가로 위치가 이 안이면 같은 줄로 �
 const LEGEND_MIN_ITEMS = 3;   // 이만큼 쌓여야 목록으로 본다
 const LEGEND_MIN_KINDS = 2;   // 종류가 이만큼 섞여야 범례로 본다
 const LEGEND_PAD = 0.02;      // 판정된 범례 상자를 이만큼 넓혀 주변까지 제외
+const SAME_SPOT_IOU = 0.5;    // 이만큼 겹치면 두 탐지가 같은 기호 하나다
 
 /**
  * 탐지 결과를 지점 목록으로 바꾼다.
@@ -294,8 +295,7 @@ function screenDetections(detections) {
  * 소화전이 한 줄로 정렬되는 일이 없다 — 그런 배치는 설명란에서만 나온다.
  */
 function findLegendZones(detections) {
-  const symbols = detections
-    .filter(d => SYMBOL_CLASSES.has(d.className))
+  const symbols = collapseSameSpot(detections.filter(d => SYMBOL_CLASSES.has(d.className)))
     .map(d => ({ ...d, cx: (d.box[0] + d.box[2]) / 2, cy: (d.box[1] + d.box[3]) / 2 }))
     .sort((a, b) => a.cx - b.cx);
 
@@ -325,6 +325,39 @@ function findLegendZones(detections) {
   }
   flush();
   return zones;
+}
+
+/**
+ * 같은 자리에 겹쳐 잡힌 탐지들을 하나로 본다 (확신이 높은 쪽만 남긴다).
+ *
+ * 중복 정리는 탐지기가 **클래스별로** 하므로, 소화기 하나를 소화전으로도 잡으면
+ * 상자 두 개가 같은 자리에 남는다. 그대로 세면 기호 하나가 "2개 · 2종류"가 되어
+ * 범례 판정의 두 조건을 혼자 채운다 — 실측에서 도면 한가운데에 없는 범례가 생겼고,
+ * 그 안에 든 **실제 비상구 하나가 통째로 버려졌다.**
+ *
+ * 여기서만 합친다. 결과 목록에서는 지우지 않는다 — 소화기인지 소화전인지는
+ * 사람이 편집기에서 보고 정할 일이고, 둘 다 보여야 고를 수 있다.
+ */
+function collapseSameSpot(detections) {
+  const byConfidence = [...detections].sort((a, b) => b.confidence - a.confidence);
+  const kept = [];
+
+  for (const d of byConfidence) {
+    if (!kept.some(k => boxIou(k.box, d.box) > SAME_SPOT_IOU)) kept.push(d);
+  }
+
+  return kept;
+}
+
+function boxIou([ax1, ay1, ax2, ay2], [bx1, by1, bx2, by2]) {
+  const w = Math.min(ax2, bx2) - Math.max(ax1, bx1);
+  const h = Math.min(ay2, by2) - Math.max(ay1, by1);
+  if (w <= 0 || h <= 0) return 0;
+
+  const inter = w * h;
+  const union = (ax2 - ax1) * (ay2 - ay1) + (bx2 - bx1) * (by2 - by1) - inter;
+
+  return union > 0 ? inter / union : 0;
 }
 
 // ------------------------------------------------------------------ 기하
@@ -389,4 +422,4 @@ function segmentsCross(p1, p2, p3, p4) {
 
 const cross = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
 
-export const _internal = { segmentIntersectsBox, nearestEdgeMidpoint, crossesAnyRoom, screenDetections, findLegendZones };
+export const _internal = { segmentIntersectsBox, nearestEdgeMidpoint, crossesAnyRoom, screenDetections, findLegendZones, collapseSameSpot };
