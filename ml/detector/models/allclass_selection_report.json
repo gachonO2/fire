@@ -1,0 +1,209 @@
+{
+  "router": {
+    "exit": {
+      "class_id": 0,
+      "model_name": "round2",
+      "model_path": "/content/round6_allclass_recall/models/round2_best.pt",
+      "threshold": 0.75,
+      "val_metrics": {
+        "threshold": 0.75,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f2": 1.0,
+        "tp": 150,
+        "fp": 0,
+        "fn": 0
+      }
+    },
+    "stair": {
+      "class_id": 1,
+      "model_name": "round2",
+      "model_path": "/content/round6_allclass_recall/models/round2_best.pt",
+      "threshold": 0.75,
+      "val_metrics": {
+        "threshold": 0.75,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f2": 1.0,
+        "tp": 75,
+        "fp": 0,
+        "fn": 0
+      }
+    },
+    "elevator": {
+      "class_id": 2,
+      "model_name": "round2",
+      "model_path": "/content/round6_allclass_recall/models/round2_best.pt",
+      "threshold": 0.75,
+      "val_metrics": {
+        "threshold": 0.75,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f2": 1.0,
+        "tp": 75,
+        "fp": 0,
+        "fn": 0
+      }
+    },
+    "extinguisher": {
+      "class_id": 3,
+      "model_name": "stage_b",
+      "model_path": "/content/drive/MyDrive/evacuation_yolo/round6_allclass_recall/runs/stage_b/weights/best.pt",
+      "threshold": 0.75,
+      "val_metrics": {
+        "threshold": 0.75,
+        "precision": 1.0,
+        "recall": 0.9912280701754386,
+        "f2": 0.992970123022847,
+        "tp": 113,
+        "fp": 0,
+        "fn": 1
+      }
+    },
+    "hydrant": {
+      "class_id": 4,
+      "model_name": "stage_b",
+      "model_path": "/content/drive/MyDrive/evacuation_yolo/round6_allclass_recall/runs/stage_b/weights/best.pt",
+      "threshold": 0.75,
+      "val_metrics": {
+        "threshold": 0.75,
+        "precision": 1.0,
+        "recall": 0.9911504424778761,
+        "f2": 0.9929078014184397,
+        "tp": 112,
+        "fp": 0,
+        "fn": 1
+      }
+    },
+    "you_are_here": {
+      "class_id": 5,
+      "model_name": "round2",
+      "model_path": "/content/round6_allclass_recall/models/round2_best.pt",
+      "threshold": 0.75,
+      "val_metrics": {
+        "threshold": 0.75,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f2": 1.0,
+        "tp": 75,
+        "fp": 0,
+        "fn": 0
+      }
+    },
+    "door": {
+      "class_id": 6,
+      "model_name": "stage_a",
+      "model_path": "/content/drive/MyDrive/evacuation_yolo/round6_allclass_recall/runs/stage_a/weights/best.pt",
+      "threshold": 0.75,
+      "val_metrics": {
+        "threshold": 0.75,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f2": 1.0,
+        "tp": 782,
+        "fp": 0,
+        "fn": 0
+      }
+    },
+    "room": {
+      "class_id": 7,
+      "model_name": "round2",
+      "model_path": "/content/round6_allclass_recall/models/round2_best.pt",
+      "threshold": 0.75,
+      "val_metrics": {
+        "threshold": 0.75,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f2": 1.0,
+        "tp": 782,
+        "fp": 0,
+        "fn": 0
+      }
+    }
+  },
+  "test_metrics": {
+    "exit": {
+      "threshold": 0.75,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f2": 1.0,
+      "tp": 150,
+      "fp": 0,
+      "fn": 0
+    },
+    "stair": {
+      "threshold": 0.75,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f2": 1.0,
+      "tp": 75,
+      "fp": 0,
+      "fn": 0
+    },
+    "elevator": {
+      "threshold": 0.75,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f2": 1.0,
+      "tp": 75,
+      "fp": 0,
+      "fn": 0
+    },
+    "extinguisher": {
+      "threshold": 0.75,
+      "precision": 1.0,
+      "recall": 0.9646017699115044,
+      "f2": 0.9714795008912656,
+      "tp": 109,
+      "fp": 0,
+      "fn": 4
+    },
+    "hydrant": {
+      "threshold": 0.75,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f2": 1.0,
+      "tp": 115,
+      "fp": 0,
+      "fn": 0
+    },
+    "you_are_here": {
+      "threshold": 0.75,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f2": 1.0,
+      "tp": 75,
+      "fp": 0,
+      "fn": 0
+    },
+    "door": {
+      "threshold": 0.75,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f2": 1.0,
+      "tp": 779,
+      "fp": 0,
+      "fn": 0
+    },
+    "room": {
+      "threshold": 0.75,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f2": 1.0,
+      "tp": 779,
+      "fp": 0,
+      "fn": 0
+    }
+  },
+  "class_order": [
+    "exit",
+    "stair",
+    "elevator",
+    "extinguisher",
+    "hydrant",
+    "you_are_here",
+    "door",
+    "room"
+  ],
+  "all_evaluable_classes_recall_1_0": false
+}

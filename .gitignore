@@ -9,8 +9,12 @@ frontend/shared/
 vendor/
 
 # 학습 중간 산출물 — 체크포인트가 수십 개씩 쌓여 저장소에 두지 않는다.
-# ml/detector/models/*.pt 는 예외다: 추론에 실제로 쓰는 최종 가중치 두 벌(11MB)이라
+# ml/detector/models/ 는 예외다: 추론에 실제로 쓰는 최종 가중치 세 벌과 라우팅 표(16MB)라
 # 이게 없으면 받아서 바로 돌려볼 수가 없다. ml/detector/README.md 참고.
+#
+# ml/training-records/ 도 예외다 — 이름이 다른 이유가 여기 있다. 학습 기록(args.yaml·
+# results.csv·지표 그림)은 손으로 골라 넣은 것이라 저장소에 남기는데, ml/runs/ 에 두면
+# 이 규칙에 걸려 통째로 사라진다. 폴더를 나눠 두면 실수로 지워질 일이 없다.
 ml/runs/
 ml/**/__pycache__/
 ml/*.pt
@@ -20,9 +24,12 @@ ml/detector/.venv/
 ml/detector/uploads/
 ml/detector/outputs/
 
-# 코랩 업로드용으로 묶은 임시 꾸러미
+# 학습 환경과 주고받는 임시 꾸러미. 안에 든 것은 풀어서 제자리에 두므로
+# (가중치·라우팅 표 → ml/detector/models/) 꾸러미 자체는 저장소에 두지 않는다.
 ml-colab.zip
 evacuation_mvp_full_with_models.zip
+round6_models_for_vscode.zip
+yolo_training_evidence.zip
 
 # 확인용으로 꺼낸 촬영 사진 (원본은 backend/data/plans.json 안에 있다)
 촬영도면/

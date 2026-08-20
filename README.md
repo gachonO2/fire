@@ -495,8 +495,8 @@ backend/
 
 ml/detector/                ← 도면 기호 탐지 (파이썬 · 별도 프로세스)
 ├── app.py                  FastAPI — /health · /detect
-├── hybrid_detector.py      두 모델 결과 합치기 + 클래스별 NMS
-└── models/*.pt             학습된 YOLO 가중치 두 벌
+├── hybrid_detector.py      클래스별 담당 모델 라우팅 + 클래스별 NMS
+└── models/                 YOLO 가중치 세 벌 + class_router.json (담당·문턱·지표)
 
 frontend/
 ├── demo.html               통합 시연 (세 화면 + 이벤트 로그) ← 발표용

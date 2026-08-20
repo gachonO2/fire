@@ -15,11 +15,12 @@
 그 크기로 되돌린다. 여기서 픽셀을 그대로 주면 축소 배율이 어긋났을 때
 지점이 도면 밖에 찍히는데, 그 오류는 사람이 화면을 봐야만 알아챈다.
 
-## 두 모델을 합치는 이유는 hybrid_detector.py 에 있다
+## 어느 모델이 어느 클래스를 맡는지는 라우팅 표가 정한다
 
-round2 는 exit·elevator·소화기·소화전·door·room 을, round4 는 stair·you_are_here 를
-맡는다. 클래스 순서(0~7)는 두 모델이 같아야 하며 시작할 때 검사한다 —
-순서가 어긋나면 "비상구"라고 찍은 것이 실제로는 "소화기"가 된다.
+`models/class_router.json` 에 클래스별 담당 모델과 검증 문턱이 적혀 있고, 여기서는
+그 표를 읽어 따른다 (자세한 이유는 hybrid_detector.py). 클래스 순서(0~7)는 모든
+가중치가 같아야 하며 시작할 때 검사한다 — 순서가 어긋나면 "비상구"라고 찍은 것이
+실제로는 "소화기"가 된다.
 
 실행:
     uvicorn app:app --host 127.0.0.1 --port 8001
@@ -36,13 +37,10 @@ import torch
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from hybrid_detector import HybridEvacuationDetector, CLASS_NAMES
+from hybrid_detector import RoutedEvacuationDetector, CLASS_NAMES
 
 BASE_DIR = Path(__file__).resolve().parent
-MODEL_DIR = BASE_DIR / "models"
-
-ROUND2_MODEL = Path(os.getenv("ROUND2_MODEL", str(MODEL_DIR / "round2_best.pt")))
-ROUND4_MODEL = Path(os.getenv("ROUND4_MODEL", str(MODEL_DIR / "round4_guarded_best.pt")))
+MODEL_DIR = Path(os.getenv("DETECTOR_MODEL_DIR", str(BASE_DIR / "models")))
 
 # 사진이 흐리거나 기울어져 있으면 확신도가 통째로 내려간다. 문턱을 높게 잡으면
 # 그런 사진에서 비상구를 통째로 놓치는데, 놓친 출구는 사람이 알아채기 어렵다.
@@ -50,6 +48,11 @@ ROUND4_MODEL = Path(os.getenv("ROUND4_MODEL", str(MODEL_DIR / "round4_guarded_be
 CONF = float(os.getenv("DETECT_CONF", "0.25"))
 IOU = float(os.getenv("DETECT_IOU", "0.50"))
 IMGSZ = int(os.getenv("DETECT_IMGSZ", "1280"))
+
+# 라우팅 표의 검증 문턱(클래스별 0.75)을 그대로 적용할지. 기본은 끈다 —
+# 그 문턱은 깨끗한 검증 도면에서 정밀도 1.0 을 얻으려고 고른 값이라, 반사광이
+# 든 실제 사진에는 너무 높다. 지표를 재현해 볼 때만 켠다.
+ENFORCE_ROUTER_THRESHOLDS = os.getenv("DETECT_ENFORCE_ROUTER_THRESHOLDS", "") == "1"
 
 DEVICE = "0" if torch.cuda.is_available() else "cpu"
 
@@ -65,16 +68,19 @@ load_error = None
 def load_models():
     global detector, load_error
     try:
-        detector = HybridEvacuationDetector(
-            round2_model=ROUND2_MODEL,
-            round4_model=ROUND4_MODEL,
+        detector = RoutedEvacuationDetector(
+            models_dir=MODEL_DIR,
             imgsz=IMGSZ,
-            conf_round2=CONF,
-            conf_round4=CONF,
+            conf=CONF,
             iou=IOU,
             device=DEVICE,
+            enforce_router_thresholds=ENFORCE_ROUTER_THRESHOLDS,
         )
+        info = detector.describe()
         print(f"[detector] 준비됨 · device={DEVICE} · imgsz={IMGSZ} · conf={CONF}")
+        print(f"[detector] 가중치 {len(info['models'])}벌: {', '.join(info['models'])}")
+        for route in info["routes"]:
+            print(f"[detector]   {route['classId']} {route['className']:<13} ← {route['model']}")
     except Exception as err:
         # 여기서 죽으면 /health 가 이유를 말하지 못한다. 백엔드는 "탐지기 없음"과
         # "탐지기가 이런 이유로 안 뜸"을 구분해서 사람에게 보여줘야 한다.
@@ -84,13 +90,20 @@ def load_models():
 
 @app.get("/health")
 def health():
-    return {
+    body = {
         "ok": detector is not None,
         "reason": load_error,
         "device": DEVICE,
         "classes": CLASS_NAMES,
-        "models": {"round2": str(ROUND2_MODEL), "round4": str(ROUND4_MODEL)},
+        "modelDir": str(MODEL_DIR),
     }
+
+    # 담당 표를 그대로 내준다. "탐지기가 떠 있다"와 "어느 가중치가 어느 기호를
+    # 맡고 있다"는 다른 정보이고, 가중치를 갈아 끼운 뒤 확인할 곳이 여기뿐이다.
+    if detector is not None:
+        body.update(detector.describe())
+
+    return body
 
 
 class DetectRequest(BaseModel):
@@ -136,6 +149,10 @@ def detect(req: DetectRequest):
                 _clamp01(d["bbox_xyxy"][3] / height),
             ],
             "sourceModel": d["source_model"],
+            # 이 탐지가 라우팅 표의 검증 문턱을 넘었는지. 넘지 못한 것도 그대로
+            # 올려 보낸다 — 놓친 출구는 사람이 알아채지 못하기 때문이다.
+            "routerThreshold": d["router_threshold"],
+            "aboveThreshold": d["above_router_threshold"],
         }
         for d in raw
     ]
