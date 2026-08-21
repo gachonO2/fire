@@ -1,10 +1,10 @@
-import { Router } from 'express';
+import { asyncRouter } from './async-router.js';
 import { events, TOPICS } from '../events.js';
 import { temperatureHazard, isStale } from '../../../shared/hazard-rules.js';
 import { currentHazards } from '../floor.js';
 import { getRepo } from '../repositories/index.js';
 
-export const streamRoutes = Router();
+export const streamRoutes = asyncRouter();
 
 /**
  * SSE 실시간 스트림 — 사용자 앱·관제 대시보드·보호자 화면이 함께 구독한다.
@@ -47,10 +47,20 @@ streamRoutes.get('/stream', async (req, res) => {
   });
   res.flushHeaders();
 
+  /**
+   * 한 화면에 보내다 실패해도 서버 전체가 멈추지 않게 두 겹으로 막는다.
+   *
+   * 1) **끊긴 연결에는 아예 쓰지 않는다.** hazards 는 저장소를 다시 읽어 합친 뒤
+   *    내보내는데(sendMergedHazards), 그 await 사이에 사용자가 화면을 닫을 수 있다.
+   *    닫힌 응답에 write 하면 응답 객체가 'error' 를 내는데, 이건 **동기 예외가
+   *    아니라서 아래 try/catch 로는 잡히지 않는다.** 그래서 미리 걸러야 한다.
+   *
+   * 2) 그래도 던지는 것이 있으면 여기서 삼킨다. EventEmitter 가 예외를 그대로
+   *    올리면 서버 프로세스가 죽는다 — 실제로 새 주제를 추가하면서 scope 에
+   *    넣는 것을 빠뜨렸다가 백엔드가 내려갔다.
+   */
   const send = (topic, data) => {
-    // 여기서 던지면 EventEmitter 가 예외를 그대로 올려 **서버 프로세스가 죽는다.**
-    // 실제로 새 주제를 추가하면서 scope 에 넣는 것을 빠뜨렸다가 백엔드가 내려갔다.
-    // 화면 하나에 보내는 데 실패한 것이 전체를 멈출 이유는 없다.
+    if (res.writableEnded || res.destroyed) return;
     try {
       const shape = scope[topic] || (v => v);
       res.write(`event: ${topic}\n`);
@@ -90,7 +100,9 @@ streamRoutes.get('/stream', async (req, res) => {
   }
 
   // 유휴 연결이 프록시에 끊기지 않도록 주석 프레임 전송
-  const keepAlive = setInterval(() => res.write(': ping\n\n'), 25000);
+  const keepAlive = setInterval(() => {
+    if (!res.writableEnded && !res.destroyed) res.write(': ping\n\n');
+  }, 25000);
 
   req.on('close', () => {
     clearInterval(keepAlive);
