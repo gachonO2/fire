@@ -1639,6 +1639,26 @@ function drawRooms() {
   // «타고 있는 방» 이 된다 — 관제하는 사람이 화면을 흘깃 봐도 먼저 눈에 든다.
   const u = Number(vb.split(/\s+/)[2]) / 400;
 
+  // ── **복도를 면으로 칠한다.**
+  //
+  // 6층은 도면 사진이 깔려 있어 「NORTH STREET」 글자와 바닥 무늬가 복도를
+  // 말해 준다. 생성한 층에는 그 사진이 없어서, 복도가 «방과 방 사이 빈 곳»
+  // 으로만 보였다. 없으면 그려야 한다.
+  const corridors = (wallData?.corridors || []).map(pts =>
+    `<polygon points="${pts.map(([x, y]) => `${x},${y}`).join(' ')}"
+      fill="#8fa6c4" fill-opacity="0.13"
+      stroke="#8fa6c4" stroke-opacity="0.22" stroke-width="${u * 0.5}"/>`).join('');
+
+  // ── 방 이름.
+  //
+  // 사진이 없는 층은 방에 이름이 없으면 «회색 칸» 일 뿐이다. 관제가 무전으로
+  // 「5.14 강의실」 을 불러야 하는데 화면에 그 이름이 없으면 못 부른다.
+  // 작은 방은 건너뛴다 — 이름이 칸보다 길면 겹쳐서 둘 다 못 읽는다.
+  const labels = rooms.filter(r => r.name && r.area > u * u * 900).map(r =>
+    `<text x="${r.cx}" y="${r.cy}" text-anchor="middle" dominant-baseline="middle"
+      font-size="${u * 2.6}" font-weight="600" fill="rgba(226,234,244,.5)"
+      >${r.name}</text>`).join('');
+
   const body = rooms.map((r, i) => {
     const d = r.points.map(([x, y]) => `${x},${y}`).join(' ');
     const fire = hot.has(i);
@@ -1665,7 +1685,7 @@ function drawRooms() {
     // 평상시 방은 **아주 옅게.** 다 진하면 상태가 생겨도 드러나지 않는다.
     return `<polygon points="${d}" fill="#cfe0f2" fill-opacity="0.05"/>`;
   }).join('');
-  svg.innerHTML = body;
+  svg.innerHTML = corridors + body + labels;
 }
 
 /**
