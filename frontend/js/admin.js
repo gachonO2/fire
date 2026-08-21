@@ -2252,6 +2252,31 @@ function drawTower() {
   }
   stack.innerHTML = rows.join('');
 
+  // ── 3D 모형. 목록과 **같은 데이터, 같은 색**을 쓴다.
+  //
+  // 둘을 따로 계산하면 언젠가 서로 다른 말을 하고, 그때 어느 쪽을 믿을지
+  // 사람이 정해야 한다. 목록은 «읽는» 것이고 모형은 «가리키는» 것이라
+  // 역할만 다르다.
+  const model = document.getElementById('tower-in');
+  if (model) {
+    // 층 간격. 아래가 1층이므로 층수가 클수록 위로 올린다.
+    // 16px 아래로는 일곱 장이 붙어 한 덩어리로 보인다.
+    const GAP = 16;
+    const lv = [];
+    for (const f of building.floors) {
+      const state = f.active && burning ? 'fire' : f.state;
+      const can = f.planId && !f.active ? '1' : '0';
+      lv.push(`<div class="lv ${f.active ? 'on' : ''}" data-state="${state}"
+        data-can="${can}" data-plan="${f.planId || ''}"
+        style="--z:${(f.floor - 1) * GAP}px"
+        title="${f.floor}층 · ${FLOOR_STATE[state].label}"></div>`);
+    }
+    model.innerHTML = lv.join('');
+    model.querySelectorAll('[data-can="1"]').forEach(el => {
+      el.addEventListener('click', () => switchFloor(el.dataset.plan));
+    });
+  }
+
   stack.querySelectorAll('[data-can="1"]').forEach(el => {
     el.addEventListener('click', () => switchFloor(el.dataset.plan));
   });
