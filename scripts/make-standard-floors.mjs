@@ -39,6 +39,8 @@
  * 묻혀 있다. 그래서 서쪽 계단이 없고 대피 방향이 동쪽으로만 열린다.
  */
 
+import { writeFileSync } from 'node:fs';
+
 const BASE = process.env.API || 'http://localhost:8080/api';
 const W = 1352;
 const H = 718;
@@ -175,6 +177,102 @@ function penthouse() {
   return { nodes, edges };
 }
 
+/**
+ * 도면에서 **벽과 방과 걸을 수 있는 칸**을 만든다.
+ *
+ * ## 왜 필요한가
+ *
+ * 관제는 세 가지를 따로 받는다 — 지점 그래프(경로용), 벽·방(그림용),
+ * 걸을 수 있는 격자(선을 벽 안 뚫게). 지점만 올리면 화면이 **텅 빈 판에
+ * 감지기만 뜬 모습**이 된다. 6층은 사진에서 뽑아 뒀지만(`extract-walls.py`)
+ * 기준층은 사진이 없다.
+ *
+ * 그런데 우리는 이 층을 **직접 지었으므로** 방이 어디고 복도가 어딘지 이미
+ * 안다. 사진에서 되짚을 필요 없이 그대로 내면 된다.
+ *
+ * ## 방은 지점을 감싸는 사각형
+ *
+ * 강의실 지점 하나가 방 하나다. 복도 쪽으로 열리는 방향을 알고 있으므로
+ * 그 반대편으로 방을 펼친다. 실제 방 크기는 모르지만 — 이건 «사진에서 잰
+ * 도면» 이 아니라 «구조를 옮겨 적은 도면» 이고, 관제에 필요한 것은 어느
+ * 방이 어디쯤 있나까지다.
+ */
+function shell(nodes, edges, opts = {}) {
+  const rooms = [];
+  const walls = [];
+  const push = (x1, y1, x2, y2) =>
+    walls.push({ x1: Math.round(x1), y1: Math.round(y1), x2: Math.round(x2), y2: Math.round(y2) });
+
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const rect = (cx, cy, w, h, ang = 0) => {
+    const c = Math.cos(ang), s = Math.sin(ang);
+    return [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]]
+      .map(([x, y]) => [Math.round(cx + x * c - y * s), Math.round(cy + x * s + y * c)]);
+  };
+
+  // 북쪽 강의실 — 대각선에 붙으므로 같이 기울인다
+  const ang = Math.atan2(dy, dx);
+  for (const n of nodes) {
+    if (n.type !== 'room') continue;
+    const north = n.id.startsWith('NR');
+    const pts = north ? rect(n.x, n.y, 96, 76, ang) : rect(n.x, n.y, 104, 78);
+    const area = 96 * 76;
+    rooms.push({ points: pts, area, cx: n.x, cy: n.y });
+    // 방을 두르는 네 변이 곧 벽이다
+    for (let i = 0; i < 4; i++) {
+      const a = pts[i], b = pts[(i + 1) % 4];
+      push(a[0], a[1], b[0], b[1]);
+    }
+  }
+
+  // 건물 외곽 — 6층과 같은 건물이므로 같은 외곽선을 쓴다
+  const FOOT = [[1351, 0], [1243, 0], [1239, 44], [210, 357], [198, 366],
+    [43, 414], [0, 414], [0, 717], [1351, 717]];
+  for (let i = 0; i < FOOT.length; i++) {
+    const a = FOOT[i], b = FOOT[(i + 1) % FOOT.length];
+    push(a[0], a[1], b[0], b[1]);
+  }
+
+  // ── 걸을 수 있는 칸.
+  //
+  // 통로를 따라 굵은 띠를 칠한다. 방은 «걸을 수 있지만 복도는 아님» 으로
+  // 두어, 경로가 남의 방을 가로지르지 않게 한다(`shared/walk-grid.js`).
+  const GW = 220, GH = 117;
+  const sx = W / GW, sy = H / GH;
+  const cells = new Uint8Array(GW * GH);
+  const corr = new Uint8Array(GW * GH);
+  const paint = (arr, x, y, r) => {
+    const cx = Math.round(x / sx), cy = Math.round(y / sy);
+    for (let j = -r; j <= r; j++) {
+      for (let i = -r; i <= r; i++) {
+        const gx = cx + i, gy = cy + j;
+        if (gx >= 0 && gx < GW && gy >= 0 && gy < GH) arr[gy * GW + gx] = 1;
+      }
+    }
+  };
+  for (const e of edges) {
+    const a = byId.get(e.a), b = byId.get(e.b);
+    if (!a || !b) continue;
+    const steps = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 4);
+    // 복도끼리 잇는 통로만 «복도» 로 친다. 방으로 들어가는 목은 걸을 수는
+    // 있되 복도가 아니다 — 그래야 경로가 방을 가로지르지 않는다.
+    const isCorr = a.type !== 'room' && b.type !== 'room';
+    for (let i = 0; i <= steps; i++) {
+      const x = a.x + (b.x - a.x) * (i / steps);
+      const y = a.y + (b.y - a.y) * (i / steps);
+      paint(cells, x, y, 2);
+      if (isCorr) paint(corr, x, y, 2);
+    }
+  }
+  for (const r of rooms) paint(cells, r.cx, r.cy, 5);
+
+  const str = a => Array.from(a, v => (v ? '1' : '0')).join('');
+  return {
+    width: W, height: H, walls, rooms, footprint: FOOT,
+    grid: { w: GW, h: GH, cells: str(cells), corridor: str(corr), marked: str(corr) },
+  };
+}
+
 async function post(path, body) {
   const r = await fetch(BASE + path, {
     method: 'POST',
@@ -208,8 +306,15 @@ for (const p of PLANS) {
     edges,
   };
   const r = await post('/plans', plan);
+
+  // 벽·방·격자를 파일로 낸다. 관제가 `/api/plans/:id/walls` 로 읽는 그 파일이다.
+  const sh = shell(nodes, edges);
+  writeFileSync(new URL(`../backend/data/walls-${p.id}.json`, import.meta.url),
+    JSON.stringify(sh));
+
   const exits = nodes.filter(n => n.type === 'exit').length;
   console.log(`  ${p.name.padEnd(20)} 지점 ${String(nodes.length).padStart(3)}`
     + ` · 통로 ${String(edges.length).padStart(3)} · 출구 ${exits}`
+    + ` · 벽 ${String(sh.walls.length).padStart(3)} · 방 ${String(sh.rooms.length).padStart(2)}`
     + `${r.warnings?.length ? `  ⚠ ${r.warnings.join(', ')}` : ''}`);
 }
