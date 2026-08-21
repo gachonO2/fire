@@ -1,261 +1,307 @@
 /**
- * 기준층 도면을 만든다 — **2·3·4·5·7층과 옥탑, 그리고 반쪽짜리 1층.**
+ * 기준층 도면 — **건축 도면의 치수를 그대로 옮긴다.**
  *
  * ## 왜 손으로 짓나
  *
  * 도면 판독기(`backend/src/planReader.js`)는 사진을 받아 지점을 뽑는다.
- * 그런데 지금 가진 것은 건축 CAD 를 화면 캡처한 저해상도 이미지라, 판독기에
- * 넣으면 방 이름도 못 읽고 벽도 뭉개진다. 그 결과를 «도면» 이라고 올리면
- * 관제가 없는 방을 그리게 된다.
+ * 그런데 가진 것은 건축 CAD 도면이라 사진과 성질이 다르다 — 방 이름과
+ * 치수가 **글자로 또박또박 적혀 있고** 벽이 선으로 정확히 그려져 있다.
+ * 사진에서 되짚어 추정할 필요가 없다. 읽어서 옮겨 적는 편이 더 정확하다.
  *
- * 그래서 **도면에서 읽은 구조를 사람이 옮겨 적는다.** 각 층 실사진을 찍어
- * 올리면 그때 판독기가 이 자리를 대신한다.
+ * 각 층 피난안내도 **사진**을 찍어 올리면 그때 판독기가 이 자리를 대신한다.
  *
- * ## 이 건물의 기준층 구조
+ * ## 도면에서 읽은 값
  *
- * 긴 쐐기꼴이다. 남쪽은 수평, 북쪽은 대각선. 그 사이가 복도이고 양쪽에
- * 강의실이 붙는다. 가운데는 **뚫려 있다** — 건물 중간을 관통하는 보이드다.
+ *     전체         75,600 × 33,600mm (긴 쐐기꼴)
+ *     기둥 간격    X방향 8,400mm × 9칸
+ *     강의실       84.00㎡ 표준 (8.4m × 10m)
+ *     계단식강의실  168.00 / 166.00㎡ (동쪽 블록 위아래)
+ *     계단         28.00㎡ · 휴게공간 62.00㎡ · 스터디 아룸파 120.00㎡
  *
- *     ┌─────────────── 북쪽 강의실 (대각선) ───────────────┐
- *     │  북쪽 복도                                          │
- *     │        ░░░ 가운데 보이드 (뚫림) ░░░                 │
- *     │  남쪽 복도                                          │
- *     └─────────────── 남쪽 강의실 (수평) ─────────────────┘
+ * **축척이 실측이라 `metersPerUnit` 이 추정값이 아니다.** 대피 거리
+ * (「출구까지 23m」)가 진짜 미터가 된다 — 6층은 걸어서 잰 값이었는데
+ * 이 층들은 도면이 직접 말해 준다.
  *
- * ## 5층만 다르다 — 중앙 연결다리
+ * ## 이 건물의 구조
  *
- * 5층에는 보이드를 가로지르는 다리가 있고 나머지 층에는 없다. 이것이
- * **대피에서 진짜 차이를 만든다** —
+ *     ┌──────────── 북쪽 강의실 1.01~1.09 (대각선) ────────┬────┐
+ *     │  북쪽 복도                                          │ 동 │
+ *     │    ░ 오픈 ░   스터디 아룸파   ░ 오픈 ░   [코어]      │ 쪽 │
+ *     │  남쪽 복도                                          │ 블 │
+ *     │  남쪽 강의실 1.12~1.24 (수평) · 사이에 계단 2곳       │ 록 │
+ *     └─────────────────────────────────────────────────────┴────┘
  *
- *   5층    남쪽 복도에서 북쪽으로 가운데를 가로질러 간다
- *   나머지  가운데가 막혀 있어 **양 끝까지 돌아가야** 한다
- *
- * 같은 자리에 불이 나도 5층 사람과 4층 사람의 대피 거리가 달라진다.
- * 층마다 도면이 필요한 이유가 정확히 이것이다.
- *
- * ## 1층은 반쪽
- *
- * 1층은 건물의 동쪽 절반만 쓴다(원형 강의실이 있는 쪽). 서쪽은 지반에
- * 묻혀 있다. 그래서 서쪽 계단이 없고 대피 방향이 동쪽으로만 열린다.
+ * 가운데는 **뚫려 있다**(하부 오픈). 두 복도는 양 끝에서만 만난다 —
+ * 5층만 예외로 중앙 연결다리가 있고, 그것이 대피 거리를 가른다.
  */
 
 import { writeFileSync } from 'node:fs';
 
 const BASE = process.env.API || 'http://localhost:8080/api';
-const W = 1352;
-const H = 718;
 
-/** 북쪽 대각선 — 외곽선에서 그대로 가져온 두 점 */
-const N0 = [1239, 44];
-const N1 = [43, 414];
-/** 남쪽 수평선 */
-const S_Y = 700;
+// ── 실측 치수(m)와 화면 좌표(px)
+const M_W = 75.6;
+const M_H = 33.6;
+/** 1m 를 몇 px 로 그릴 것인가. 20 이면 1512×672 — 6층 도면과 비슷한 크기다. */
+const PPM = 20;
+const W = Math.round(M_W * PPM);
+const H = Math.round(M_H * PPM);
+/** 도면 한 칸이 몇 m 인가. **추정이 아니라 도면에서 읽은 값이다.** */
+const METERS_PER_UNIT = 1 / PPM;
 
-const dx = N1[0] - N0[0];
-const dy = N1[1] - N0[1];
+const m = v => Math.round(v * PPM);
+
+/**
+ * 건물 외곽선.
+ *
+ * 남쪽과 동쪽은 직각, 북쪽은 대각선, 서쪽 끝은 한 번 꺾이며 좁아진다.
+ * 도면의 통심선(X1~X10, Y1~Y6)에서 읽었다.
+ */
+const N_EAST = [M_W, 1.2];      // 대각선 동쪽 끝 (오른쪽 위)
+const N_WEST = [9.0, 21.0];     // 대각선 서쪽 끝 (서쪽 계단 위)
+const FOOT_M = [
+  N_EAST, N_WEST,
+  [4.0, 25.6],
+  [4.0, M_H], [M_W, M_H],
+];
+const FOOT = FOOT_M.map(([x, y]) => [m(x), m(y)]);
+
+// ── 북쪽 대각선의 방향과 **안쪽** 법선
+const dx = N_WEST[0] - N_EAST[0];
+const dy = N_WEST[1] - N_EAST[1];
 const len = Math.hypot(dx, dy);
 /**
- * 대각선에서 건물 **안쪽**을 향하는 단위 법선.
+ * 안쪽은 아래(+y). `(-dy, dx)` 는 위를 가리키므로 뒤집는다.
  *
- * 부호를 한 번 틀려서 북쪽 복도 전체가 건물 밖(y = −69)에 놓였다. 화면에는
- * 방들이 외벽을 뚫고 허공에 걸린 것으로 나왔다.
- *
- * 이 건물의 대각선은 동북쪽(1239,44)에서 서남쪽(43,414)으로 내려가고,
- * **안쪽은 아래(+y)** 다. `(-dy, dx)` 는 위를 가리키므로 뒤집는다.
- * 부호를 눈으로 고르지 말고 아래 `assert` 로 확인한다.
+ * 부호를 눈으로 고르면 틀린다 — 실제로 한 번 틀려서 북쪽 강의실이 통째로
+ * 건물 밖(y = −69)에 놓였고, 화면에는 방들이 외벽을 뚫고 허공에 걸린 것으로
+ * 나왔다. 그래서 여기서 확인하고 넘어간다.
  */
 const nx = dy / len;
 const ny = -dx / len;
-// 안쪽으로 100 들어간 점은 반드시 도면 안(y > 0)이라야 한다
-if (N0[1] + ny * 100 <= 0) throw new Error('법선이 건물 밖을 향한다');
+if (N_EAST[1] + ny * 5 <= 0) throw new Error('법선이 건물 밖을 향한다');
 
-/** 대각선 위 비율 t(0=동쪽 끝, 1=서쪽 끝)에서 안쪽으로 d 만큼 들어간 점 */
+/** 대각선 위 비율 t(0=동쪽)에서 안쪽으로 d 미터 들어간 점 (px) */
 const onDiag = (t, d) => [
-  Math.round(N0[0] + dx * t + nx * d),
-  Math.round(N0[1] + dy * t + ny * d),
+  m(N_EAST[0] + dx * t + nx * d),
+  m(N_EAST[1] + dy * t + ny * d),
 ];
 
-const node = (id, type, name, x, y, extra = {}) =>
-  ({ id, type, name, x, y, ...extra });
+const node = (id, type, name, x, y, extra = {}) => ({ id, type, name, x, y, ...extra });
 
-/**
- * 기준층 하나를 만든다.
- * @param {number} floor
- * @param {{bridge?: boolean, half?: boolean}} opts
- */
 /**
  * 기준층 하나.
  *
- * ## 도면을 다시 읽고 고친 것
- *
- * 처음에는 지점만 찍고 방을 «지점을 감싸는 사각형» 으로 그렸다. 그랬더니
- * 방들이 서로 떨어져 **허공에 뜬 상자 스무 개**가 됐다. 실제 도면은
- * 그렇지 않다 — 방은 서로 벽을 맞대고 붙어 있고, 바깥쪽은 건물 외벽에
- * 닿아 있다.
- *
- *     ┌────────────────────────────────────┐
- *     │ 북쪽 강의실 (대각선 외벽에 붙어 연속) │
- *     │   북쪽 복도                          │
- *     │        ░ 가운데 보이드 ░      ┌──────┤
- *     │   남쪽 복도                   │ 동쪽 │
- *     │ 남쪽 강의실 (남쪽 외벽에 붙어) │ 블록 │
- *     └───────────────────────────────┴──────┘
- *
- * 동쪽 블록은 계단·엘리베이터·화장실이 모인 곳이다. 도면에서 제일 눈에
- * 띄는 덩어리인데 처음엔 통째로 빠져 있었다.
+ * @param {number} floor
+ * @param {{bridge?: boolean, half?: boolean}} opts
+ *   `bridge` 5층의 중앙 연결다리 · `half` 1층은 동쪽 절반만
  */
 function standardFloor(floor, opts = {}) {
   const nodes = [];
   const edges = [];
-  const link = (a, b, extra = {}) =>
-    edges.push({ id: `e${edges.length + 1}`, a, b, wall: null, ...extra });
-  /** 방 폴리곤 — 지점과 함께 낸다. 나중에 되짚지 않으려고 여기서 같이 만든다. */
   const rooms = [];
+  const link = (a, b) => edges.push({ id: `e${edges.length + 1}`, a, b, wall: null });
+  const corridors = [];
+  const put = (pts, name) => rooms.push({ pts: pts.map(([x, y]) => [m(x), m(y)]), name });
+  const band = pts => corridors.push(pts.map(([x, y]) => [m(x), m(y)]));
 
-  // 1층은 동쪽 절반만. 서쪽은 지반에 묻혀 있다.
-  const tTo = opts.half ? 0.44 : 0.9;
-  const SPANS = opts.half ? 5 : 11;
-  const xFrom = opts.half ? 690 : 60;
-  const xTo = 1140;                       // 동쪽 블록 앞에서 멈춘다
+  // 외벽 → 방(10m) → 복도(12.6m) 순서라야 방문이 복도로 난다.
+  const D_ROOM = 10.0;
+  const D_CORR = 12.6;
+  const EAST_X = 62.0;          // 동쪽 블록 왼쪽 벽
 
-  // 외벽(0) → 방(78) → 복도(112). 복도가 방보다 안쪽이라야 방문이 복도로 난다.
-  const D_ROOM = 78;
-  const D_CORR = 112;
-
-  // ── 북쪽 — 대각선 외벽에 붙은 연속된 강의실
+  // ── 북쪽 강의실 1.01~1.09 — 대각선 외벽에 붙어 연속
+  //
+  // 84㎡ = 8.4m(기둥 간격) × 10m(깊이). 도면의 방 아홉 개가 그대로 아홉 칸이다.
+  const N_ROOMS = opts.half ? 4 : 9;
+  // **동쪽 끝에서 바로 시작하지 않는다.**
+  //
+  // 대각선의 동쪽 끝은 동쪽 외벽 모서리다. 거기서 안쪽으로 12.6m 들어가면
+  // x 가 79.2m 가 되어 건물(75.6m)을 넘는다 — 법선이 +x 성분을 갖기 때문이다.
+  // 실제 도면에서도 북쪽 강의실은 동쪽 블록 앞에서 끝난다. 그 자리를 계산해
+  // 시작점으로 삼는다.
+  const tStart = Math.max(0, (N_EAST[0] + nx * D_CORR - EAST_X) / -dx);
+  const tEnd = opts.half ? tStart + 0.32 : 0.96;
   const nCorr = [];
-  for (let i = 0; i <= SPANS; i++) {
-    const t = (tTo * i) / SPANS;
+  for (let i = 0; i <= N_ROOMS; i++) {
+    const t = tStart + ((tEnd - tStart) * i) / N_ROOMS;
     const [cx, cy] = onDiag(t, D_CORR);
     const id = `N${i}`;
     nodes.push(node(id, 'junction', `북쪽 복도 ${i + 1}`, cx, cy));
     nCorr.push(id);
     if (i > 0) link(nCorr[i - 1], id);
-    if (i === SPANS) break;
+    if (i === N_ROOMS) break;
 
-    const t2 = (tTo * (i + 1)) / SPANS;
-    const [rx, ry] = onDiag((t + t2) / 2, D_ROOM / 2 + 6);
-    const rid = `NR${i}`;
-    nodes.push(node(rid, 'room', `${floor}${String(i + 1).padStart(2, '0')}호`, rx, ry));
-    link(id, rid);
-    // 대각선을 따라 이웃과 변을 맞댄 사다리꼴
-    rooms.push([onDiag(t, 6), onDiag(t2, 6),
-      onDiag(t2, D_ROOM + 6), onDiag(t, D_ROOM + 6)]);
+    const t2 = tStart + ((tEnd - tStart) * (i + 1)) / N_ROOMS;
+    const [rx, ry] = onDiag((t + t2) / 2, D_ROOM / 2);
+    const name = `${floor}.0${i + 1} 강의실`;
+    nodes.push(node(`NR${i}`, 'room', name, rx, ry, { area: 84 }));
+    link(id, `NR${i}`);
+    // 이웃과 변을 맞댄 사다리꼴 — 떨어뜨리면 «허공에 뜬 상자» 가 된다
+    rooms.push({ pts: [onDiag(t, 0), onDiag(t2, 0), onDiag(t2, D_ROOM), onDiag(t, D_ROOM)], name });
   }
 
-  // ── 남쪽 — 남쪽 외벽에 붙은 연속된 강의실
-  const S_WALL = 711;
+  // ── 남쪽 강의실과 계단 — 남쪽 외벽에 붙어 연속
+  //
+  // 도면대로 **계단이 사이에 끼어 있다.** 강의실만 죽 늘어놓으면 남쪽에서
+  // 대피할 길이 양 끝뿐인데, 실제로는 가운데에도 계단이 둘 있다.
+  const S_BAND = opts.half
+    ? ['room', 'room', 'exit', 'room']
+    : ['room', 'room', 'room', 'room', 'room', 'room', 'exit',
+      'room', 'room', 'room', 'room', 'room', 'room', 'exit'];
+  const sFrom = opts.half ? 34.0 : 5.0;
+  const sTo = EAST_X - 0.4;
   const sCorr = [];
-  for (let i = 0; i <= SPANS; i++) {
-    const cx = Math.round(xFrom + (xTo - xFrom) * (i / SPANS));
+  let roomNo = 12;
+  let stairNo = 0;
+  for (let i = 0; i <= S_BAND.length; i++) {
+    const x = sFrom + ((sTo - sFrom) * i) / S_BAND.length;
     const id = `S${i}`;
-    nodes.push(node(id, 'junction', `남쪽 복도 ${i + 1}`, cx, S_WALL - D_CORR));
+    nodes.push(node(id, 'junction', `남쪽 복도 ${i + 1}`, m(x), m(M_H - D_CORR)));
     sCorr.push(id);
     if (i > 0) link(sCorr[i - 1], id);
-    if (i === SPANS) break;
+    if (i === S_BAND.length) break;
 
-    const x2 = Math.round(xFrom + (xTo - xFrom) * ((i + 1) / SPANS));
-    const rid = `SR${i}`;
-    nodes.push(node(rid, 'room', `${floor}${String(20 + i).padStart(2, '0')}호`,
-      Math.round((cx + x2) / 2), S_WALL - D_ROOM / 2 - 6));
-    link(id, rid);
-    rooms.push([[cx, S_WALL - D_ROOM - 6], [x2, S_WALL - D_ROOM - 6],
-      [x2, S_WALL - 6], [cx, S_WALL - 6]]);
+    const kind = S_BAND[i];
+    const x2 = sFrom + ((sTo - sFrom) * (i + 1)) / S_BAND.length;
+    const isStair = kind === 'exit';
+    // **계단이 곧 비상구다.** 6층과 같은 이름 규칙을 쓴다 —
+    // 「비상구 (…)」 로 통일해야 안내 음성이 층마다 다른 말을 안 한다.
+    const name = isStair
+      ? `비상구 (남쪽 계단 ${++stairNo})` : `${floor}.${roomNo++} 강의실`;
+    nodes.push(node(`SR${i}`, kind, name,
+      m((x + x2) / 2), m(M_H - D_ROOM / 2), isStair ? { area: 28 } : { area: 84 }));
+    link(id, `SR${i}`);
+    put([[x, M_H - D_ROOM], [x2, M_H - D_ROOM], [x2, M_H], [x, M_H]], name);
   }
 
-  // ── 동쪽 블록 — 계단·엘리베이터·화장실. 도면에서 제일 큰 덩어리다.
-  const EX0 = 1160;
-  const EX1 = 1340;
+  // ── 동쪽 블록 — 계단식강의실 둘과 강의실 셋.
+  //
+  // 도면에서 제일 큰 덩어리다. 1.25(168㎡)와 1.29(166㎡)가 위아래를 차지하고
+  // 그 사이에 84㎡ 강의실 셋이 들어간다.
   const EAST = [
-    ['EAST_STAIR', 'exit', '동쪽 계단', 120, 230],
-    ['ELEV', 'elevator', '엘리베이터', 250, 360],
-    ['EAST_WC', 'room', '화장실', 380, 500],
-    ['EAST_LEC', 'room', '계단식 강의실', 520, 690],
+    ['EL1', `${floor}.25 계단식강의실`, 1.2, 8.0, 168],
+    ['ER1', `${floor}.26 강의실`, 8.0, 13.6, 84],
+    ['ER2', `${floor}.27 강의실`, 13.6, 19.2, 84],
+    ['ER3', `${floor}.28 강의실`, 19.2, 24.8, 84],
+    ['EL2', `${floor}.29 계단식강의실`, 24.8, M_H, 166],
   ];
-  const eastHall = 'E_HALL';
-  nodes.push(node(eastHall, 'junction', '동쪽 홀', EX0 - 26, 430));
-  link(eastHall, nCorr[0]);
-  link(eastHall, sCorr[SPANS]);
-  for (const [id, type, name, y0, y1] of EAST) {
-    nodes.push(node(id, type, name, Math.round((EX0 + EX1) / 2), Math.round((y0 + y1) / 2)));
-    link(eastHall, id);
-    rooms.push([[EX0, y0], [EX1, y0], [EX1, y1], [EX0, y1]]);
+  nodes.push(node('E_HALL', 'junction', '동쪽 홀', m(EAST_X - 2.4), m(17.0)));
+  link('E_HALL', nCorr[0]);
+  link('E_HALL', sCorr[S_BAND.length]);
+  for (const [id, name, y0, y1, area] of EAST) {
+    nodes.push(node(id, 'room', name, m((EAST_X + M_W) / 2), m((y0 + y1) / 2), { area }));
+    link('E_HALL', id);
+    put([[EAST_X, y0], [M_W, y0], [M_W, y1], [EAST_X, y1]], name);
   }
 
-  // ── 서쪽 끝에서 두 복도가 만난다. **가운데는 뚫려 있다.**
+  // 코어 — 계단·엘리베이터·화장실. 동쪽 홀 바로 옆이다.
+  nodes.push(node('EXIT_E', 'exit', '비상구 (동쪽 계단)', m(EAST_X - 5.6), m(12.0), { area: 28 }));
+  nodes.push(node('ELEV', 'elevator', '엘리베이터', m(EAST_X - 5.6), m(16.4)));
+  nodes.push(node('WC', 'room', '화장실', m(EAST_X - 5.6), m(21.0), { area: 40 }));
+  // 도면의 코어에는 계단이 둘이다 — 승강기를 사이에 두고 위아래.
+  // 화재 시 승강기를 못 쓰므로 이 둘이 동쪽 대피의 전부다.
+  nodes.push(node('EXIT_NE', 'exit', '비상구 (북동 계단)', m(EAST_X - 5.6), m(25.4), { area: 28 }));
+  for (const id of ['EXIT_E', 'ELEV', 'WC', 'EXIT_NE']) link('E_HALL', id);
+  put([[EAST_X - 8.4, 9.6], [EAST_X, 9.6], [EAST_X, 23.4], [EAST_X - 8.4, 23.4]], '코어');
+
+  // ── 가운데 — 스터디 아룸파(120㎡). 나머지는 하부 오픈이라 방이 아니다.
   if (!opts.half) {
-    nodes.push(node('EXIT_W', 'exit', '서쪽 계단', 96, 470));
-    link('EXIT_W', nCorr[SPANS]);
+    const mid = Math.round(sCorr.length / 2);
+    nodes.push(node('STUDY', 'room', '스터디 아룸파', m(34.0), m(19.0), { area: 120 }));
+    link(sCorr[mid], 'STUDY');
+    put([[29.0, 15.5], [41.0, 15.5], [41.0, 22.5], [29.0, 22.5]], '스터디 아룸파');
+  }
+
+  // ── 서쪽 끝 — 계단(28㎡)과 휴게공간(62㎡)
+  if (!opts.half) {
+    nodes.push(node('EXIT_W', 'exit', '비상구 (서쪽 계단)', m(7.4), m(23.0), { area: 28 }));
+    link('EXIT_W', nCorr[N_ROOMS]);
     link('EXIT_W', sCorr[0]);
+    put([[4.6, 20.4], [10.4, 20.4], [10.4, 25.4], [4.6, 25.4]], '서쪽 계단');
+
+    nodes.push(node('LOUNGE', 'room', '휴게공간', m(8.0), m(28.6), { area: 62 }));
+    link('LOUNGE', sCorr[0]);
+    put([[4.2, 25.6], [12.0, 25.6], [12.0, M_H - D_ROOM], [4.2, M_H - D_ROOM]], '휴게공간');
+  } else {
+    // 1층은 서쪽이 지반에 묻혀 있어 서쪽 계단이 없다 — 대피가 동쪽으로만 열린다
+    link(nCorr[N_ROOMS], sCorr[0]);
   }
 
   // ── 5층만 있는 중앙 연결다리.
   //
-  // 이 한 줄이 5층과 나머지 층의 대피를 가른다 — 가운데가 막힌 층은 같은
-  // 자리에서 불이 나도 양 끝까지 돌아가야 한다.
+  // **이 한 줄이 5층과 나머지 층의 대피를 가른다.** 가운데가 뚫려 있어 두
+  // 복도는 양 끝에서만 만나는데, 5층만 가운데를 가로지를 수 있다.
   if (opts.bridge) {
-    const mid = Math.round(SPANS / 2);
-    const a = nodes.find(n => n.id === nCorr[mid]);
-    const b = nodes.find(n => n.id === sCorr[mid]);
+    const nm = Math.round(N_ROOMS / 2);
+    const sm = Math.round(sCorr.length / 2);
+    const a = nodes.find(n => n.id === nCorr[nm]);
+    const b = nodes.find(n => n.id === sCorr[sm]);
     nodes.push(node('BRIDGE', 'junction', '중앙 연결다리',
       Math.round((a.x + b.x) / 2), Math.round((a.y + b.y) / 2)));
-    link(nCorr[mid], 'BRIDGE');
-    link('BRIDGE', sCorr[mid]);
+    link(nCorr[nm], 'BRIDGE');
+    link('BRIDGE', sCorr[sm]);
   }
 
-  // 중앙 계단 — 남쪽 복도 한가운데
-  if (!opts.half) {
-    const mid = Math.round(SPANS / 2);
-    const m = nodes.find(n => n.id === sCorr[mid]);
-    nodes.push(node('EXIT_M', 'exit', '중앙 계단', m.x, m.y - 44));
-    link('EXIT_M', sCorr[mid]);
+  // ── **복도를 면으로 그린다.**
+  //
+  // 여태 복도는 지점을 잇는 선일 뿐이라 화면에서 «방과 방 사이 빈 곳» 으로
+  // 보였다. 6층은 도면 사진이 깔려 있어 「NORTH STREET」 글자와 바닥 무늬가
+  // 복도를 말해 주는데, 생성한 층에는 그 사진이 없다. 없으면 그려야 한다.
+  //
+  // 폭은 방 끝(10m)에서 복도 중심(12.6m) 너머까지 — 실제 복도 폭 2.6m 다.
+  band([onDiag(tStart, D_ROOM), onDiag(tEnd, D_ROOM),
+    onDiag(tEnd, D_ROOM + 2.6), onDiag(tStart, D_ROOM + 2.6)]);
+  band([[sFrom, M_H - D_ROOM - 2.6], [sTo, M_H - D_ROOM - 2.6],
+    [sTo, M_H - D_ROOM], [sFrom, M_H - D_ROOM]]);
+  // 동쪽 홀 — 두 복도를 잇는 세로 통로
+  band([[EAST_X - 3.6, 6.0], [EAST_X - 1.0, 6.0],
+    [EAST_X - 1.0, M_H - D_ROOM], [EAST_X - 3.6, M_H - D_ROOM]]);
+  if (opts.bridge) {
+    const nm = Math.round(N_ROOMS / 2);
+    const sm = Math.round(sCorr.length / 2);
+    const a = nodes.find(n => n.id === nCorr[nm]);
+    const b = nodes.find(n => n.id === sCorr[sm]);
+    corridors.push([[a.x - m(1.3), a.y], [a.x + m(1.3), a.y],
+      [b.x + m(1.3), b.y], [b.x - m(1.3), b.y]]);
   }
 
-  return { nodes, edges, rooms };
+  return { nodes, edges, rooms, corridors };
 }
 
-/** 옥탑 — 옥상으로 나가는 층. 방이 거의 없고 계단과 기계실뿐이다. */
+/** 옥탑 — 옥상으로 나가는 층. 계단과 기계실뿐이다. */
 function penthouse() {
   const nodes = [
-    node('PH_HALL', 'junction', '옥탑 복도', 1180, 330),
-    node('PH_MACH', 'room', '기계실', 1100, 250),
-    node('EXIT_ROOF', 'exit', '옥상 출구 (운동장 방향)', 1300, 380),
-    node('ELEV', 'elevator', '엘리베이터', 1240, 300),
+    node('PH_HALL', 'junction', '옥탑 복도', m(64.0), m(17.0)),
+    node('PH_MACH', 'room', '기계실', m(69.0), m(9.5), { area: 90 }),
+    node('EXIT_ROOF', 'exit', '옥상 출구 (운동장 방향)', m(70.0), m(24.0)),
+    node('ELEV', 'elevator', '엘리베이터', m(58.0), m(16.4)),
   ];
   const edges = [
     { id: 'e1', a: 'PH_HALL', b: 'PH_MACH', wall: null },
     { id: 'e2', a: 'PH_HALL', b: 'EXIT_ROOF', wall: null },
     { id: 'e3', a: 'PH_HALL', b: 'ELEV', wall: null },
   ];
-  return { nodes, edges };
+  return {
+    nodes, edges,
+    rooms: [{ pts: [[m(62), m(5)], [m(M_W), m(5)], [m(M_W), m(14)], [m(62), m(14)]],
+      name: '기계실' }],
+    corridors: [[[m(56), m(15.6)], [m(72), m(15.6)], [m(72), m(18.4)], [m(56), m(18.4)]]],
+  };
 }
 
 /**
- * 도면에서 **벽과 방과 걸을 수 있는 칸**을 만든다.
- *
- * ## 왜 필요한가
+ * 벽·방·걸을 수 있는 칸.
  *
  * 관제는 세 가지를 따로 받는다 — 지점 그래프(경로용), 벽·방(그림용),
- * 걸을 수 있는 격자(선을 벽 안 뚫게). 지점만 올리면 화면이 **텅 빈 판에
- * 감지기만 뜬 모습**이 된다. 6층은 사진에서 뽑아 뒀지만(`extract-walls.py`)
- * 기준층은 사진이 없다.
- *
- * 그런데 우리는 이 층을 **직접 지었으므로** 방이 어디고 복도가 어딘지 이미
- * 안다. 사진에서 되짚을 필요 없이 그대로 내면 된다.
- *
- * ## 방은 지점을 감싸는 사각형
- *
- * 강의실 지점 하나가 방 하나다. 복도 쪽으로 열리는 방향을 알고 있으므로
- * 그 반대편으로 방을 펼친다. 실제 방 크기는 모르지만 — 이건 «사진에서 잰
- * 도면» 이 아니라 «구조를 옮겨 적은 도면» 이고, 관제에 필요한 것은 어느
- * 방이 어디쯤 있나까지다.
+ * 격자(선이 벽을 안 뚫게). 지점만 올리면 화면이 텅 빈 판이 된다.
  */
-function shell(nodes, edges, roomPolys) {
+function shell(nodes, edges, roomPolys, corridorPolys = []) {
   const rooms = [];
   const walls = [];
   const seen = new Set();
-  // **같은 벽을 두 번 긋지 않는다.** 방이 서로 변을 맞대고 있으므로 네 변을
-  // 다 그으면 칸막이가 겹쳐 두 겹이 되고, 세워 놓으면 z-파이팅으로 깜빡인다.
+  // **같은 벽을 두 번 긋지 않는다.** 방이 서로 변을 맞대므로 네 변을 다
+  // 그으면 칸막이가 두 겹이 되고, 세워 놓으면 z-파이팅으로 깜빡인다.
   const push = (a, b) => {
     const k = [a, b].map(p => p.map(Math.round).join(',')).sort().join('|');
     if (seen.has(k)) return;
@@ -264,7 +310,7 @@ function shell(nodes, edges, roomPolys) {
       x2: Math.round(b[0]), y2: Math.round(b[1]) });
   };
 
-  for (const pts of roomPolys) {
+  for (const { pts, name } of roomPolys) {
     const p = pts.map(([x, y]) => [Math.round(x), Math.round(y)]);
     let a2 = 0;
     for (let i = 0; i < p.length; i++) {
@@ -273,22 +319,14 @@ function shell(nodes, edges, roomPolys) {
       push(p[i], q);
     }
     rooms.push({
-      points: p, area: Math.abs(a2) / 2,
-      cx: p.reduce((s2, q) => s2 + q[0], 0) / p.length,
-      cy: p.reduce((s2, q) => s2 + q[1], 0) / p.length,
+      points: p, name, area: Math.abs(a2) / 2,
+      cx: p.reduce((s, q) => s + q[0], 0) / p.length,
+      cy: p.reduce((s, q) => s + q[1], 0) / p.length,
     });
   }
-
-  // 건물 외곽 — 6층과 같은 건물이므로 같은 외곽선을 쓴다
-  const FOOT = [[1351, 0], [1243, 0], [1239, 44], [210, 357], [198, 366],
-    [43, 414], [0, 414], [0, 717], [1351, 717]];
   for (let i = 0; i < FOOT.length; i++) push(FOOT[i], FOOT[(i + 1) % FOOT.length]);
 
-  // ── 걸을 수 있는 칸.
-  //
-  // 통로를 따라 띠를 칠한다. 방은 «걸을 수 있지만 복도는 아님» 으로 두어,
-  // 경로가 남의 방을 가로지르지 않게 한다(`shared/walk-grid.js`).
-  const GW = 220, GH = 117;
+  const GW = 240, GH = 108;
   const sx = W / GW, sy = H / GH;
   const cells = new Uint8Array(GW * GH);
   const corr = new Uint8Array(GW * GH);
@@ -306,6 +344,8 @@ function shell(nodes, edges, roomPolys) {
     const a = byId.get(e.a), b = byId.get(e.b);
     if (!a || !b) continue;
     const steps = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 4);
+    // 복도끼리 잇는 통로만 «복도» 로 친다. 방으로 들어가는 목은 걸을 수는
+    // 있되 복도가 아니다 — 그래야 경로가 남의 방을 가로지르지 않는다.
     const isCorr = a.type !== 'room' && b.type !== 'room';
     for (let i = 0; i <= steps; i++) {
       const x = a.x + (b.x - a.x) * (i / steps);
@@ -319,6 +359,8 @@ function shell(nodes, edges, roomPolys) {
   const str = a => Array.from(a, v => (v ? '1' : '0')).join('');
   return {
     width: W, height: H, walls, rooms, footprint: FOOT,
+    // 복도는 방과 따로 낸다 — 화면에서 다른 색으로 칠해야 «길» 로 읽힌다
+    corridors: corridorPolys.map(pts => pts.map(([x, y]) => [Math.round(x), Math.round(y)])),
     grid: { w: GW, h: GH, cells: str(cells), corridor: str(corr), marked: str(corr) },
   };
 }
@@ -344,21 +386,25 @@ const PLANS = [
   { id: 'ai-ph', name: 'AI공학관 8층 (옥탑)', build: penthouse },
 ];
 
+console.log(`  건물 ${M_W}m × ${M_H}m · 축척 ${METERS_PER_UNIT} m/unit (도면 실측)`);
 for (const p of PLANS) {
-  const { nodes, edges, rooms: roomPolys = [] } = p.build();
+  const { nodes, edges, rooms: roomPolys = [], corridors = [] } = p.build();
+  // 도면 밖으로 나간 지점이 하나라도 있으면 멈춘다 — 화면에서 «벽을 뚫은»
+  // 것으로 보이는 그 상태다. 눈으로 찾지 말고 여기서 잡는다.
+  const outside = nodes.filter(n => n.x < 0 || n.y < 0 || n.x > W || n.y > H);
+  if (outside.length) throw new Error(`${p.name}: 도면 밖 지점 ${outside.map(n => n.id)}`);
+
   const plan = {
     id: p.id,
     name: p.name,
-    metersPerUnit: 0.1087,      // 6층 실측값과 같은 축척 — 같은 건물이다
+    metersPerUnit: METERS_PER_UNIT,
     stepLength: 0.7,
     image: { width: W, height: H },
     nodes,
     edges,
   };
   const r = await post('/plans', plan);
-
-  // 벽·방·격자를 파일로 낸다. 관제가 `/api/plans/:id/walls` 로 읽는 그 파일이다.
-  const sh = shell(nodes, edges, roomPolys);
+  const sh = shell(nodes, edges, roomPolys, corridors);
   writeFileSync(new URL(`../backend/data/walls-${p.id}.json`, import.meta.url),
     JSON.stringify(sh));
 
@@ -366,5 +412,6 @@ for (const p of PLANS) {
   console.log(`  ${p.name.padEnd(20)} 지점 ${String(nodes.length).padStart(3)}`
     + ` · 통로 ${String(edges.length).padStart(3)} · 출구 ${exits}`
     + ` · 벽 ${String(sh.walls.length).padStart(3)} · 방 ${String(sh.rooms.length).padStart(2)}`
+    + ` · 복도 ${sh.corridors.length}`
     + `${r.warnings?.length ? `  ⚠ ${r.warnings.join(', ')}` : ''}`);
 }
