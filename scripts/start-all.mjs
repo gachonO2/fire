@@ -82,7 +82,7 @@ function start(service) {
 
     if (service.quickRestarts > MAX_QUICK_RESTARTS) {
       console.error(`\n${service.name}가 반복해서 즉시 종료됩니다. 위 오류를 확인하세요.`);
-      console.error(`   고친 뒤 다시 실행하세요: npm run dev\n`);
+      console.error(`   고친 뒤 다시 실행하세요: npm run dev:all\n`);
       return;
     }
 
