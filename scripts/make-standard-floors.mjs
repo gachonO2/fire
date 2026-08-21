@@ -54,9 +54,20 @@ const S_Y = 700;
 const dx = N1[0] - N0[0];
 const dy = N1[1] - N0[1];
 const len = Math.hypot(dx, dy);
-/** 대각선에서 건물 **안쪽**을 향하는 단위 법선 */
-const nx = -dy / len;
-const ny = dx / len;
+/**
+ * 대각선에서 건물 **안쪽**을 향하는 단위 법선.
+ *
+ * 부호를 한 번 틀려서 북쪽 복도 전체가 건물 밖(y = −69)에 놓였다. 화면에는
+ * 방들이 외벽을 뚫고 허공에 걸린 것으로 나왔다.
+ *
+ * 이 건물의 대각선은 동북쪽(1239,44)에서 서남쪽(43,414)으로 내려가고,
+ * **안쪽은 아래(+y)** 다. `(-dy, dx)` 는 위를 가리키므로 뒤집는다.
+ * 부호를 눈으로 고르지 말고 아래 `assert` 로 확인한다.
+ */
+const nx = dy / len;
+const ny = -dx / len;
+// 안쪽으로 100 들어간 점은 반드시 도면 안(y > 0)이라야 한다
+if (N0[1] + ny * 100 <= 0) throw new Error('법선이 건물 밖을 향한다');
 
 /** 대각선 위 비율 t(0=동쪽 끝, 1=서쪽 끝)에서 안쪽으로 d 만큼 들어간 점 */
 const onDiag = (t, d) => [
@@ -107,8 +118,9 @@ function standardFloor(floor, opts = {}) {
   const xFrom = opts.half ? 690 : 60;
   const xTo = 1140;                       // 동쪽 블록 앞에서 멈춘다
 
-  const D_ROOM = 78;                      // 방 깊이
-  const D_CORR = 118;                     // 복도 중심까지
+  // 외벽(0) → 방(78) → 복도(112). 복도가 방보다 안쪽이라야 방문이 복도로 난다.
+  const D_ROOM = 78;
+  const D_CORR = 112;
 
   // ── 북쪽 — 대각선 외벽에 붙은 연속된 강의실
   const nCorr = [];
