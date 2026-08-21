@@ -23,6 +23,8 @@ const server = createApp().listen(0);
 const port = server.address().port;
 const BASE = `http://127.0.0.1:${port}`;
 
+import { PHOTO_SCENARIO } from '../../shared/photo-scenario.js';
+
 const api = async (pathname, opts = {}) => {
   const res = await fetch(BASE + pathname, {
     headers: { 'Content-Type': 'application/json' },
@@ -110,10 +112,14 @@ const armedPhoto = await api('/api/demo/photo-scenario/arm', { method: 'POST' })
 expect('사진 시나리오 준비는 시작점에 정지',
   armedPhoto.body.timelineState === 'armed' && armedPhoto.body.progress === 0);
 const startedPhoto = await api('/api/demo/photo-scenario/start', { method: 'POST' });
-expect('휴대폰 진입 시 90초 공용 타임라인 시작',
+// 시간을 숫자로 못 박지 않는다 — 구간마다 더해서 나오는 값이라,
+// 실측(첫 구간 9초)이나 걷는 속도를 고치면 총 시간도 같이 바뀐다.
+// 여기서 확인할 것은 «관제와 휴대폰이 같은 시계를 쓴다» 이다.
+expect('휴대폰 진입 시 공용 타임라인 시작',
   startedPhoto.body.timelineState === 'running' &&
-  startedPhoto.body.scenarioDurationMs === 90_000 &&
-  Number.isFinite(startedPhoto.body.scenarioStartedAt));
+  startedPhoto.body.scenarioDurationMs === PHOTO_SCENARIO.durationMs &&
+  Number.isFinite(startedPhoto.body.scenarioStartedAt),
+  `${(startedPhoto.body.scenarioDurationMs / 1000).toFixed(1)}초`);
 const livePhoto = await api('/api/demo/photo-scenario');
 expect('서버가 관제·휴대폰 공용 좌표를 반환',
   livePhoto.body.userId === 'scenario-cocone-photo' &&

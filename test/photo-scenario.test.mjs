@@ -1,6 +1,5 @@
 import {
-  PHOTO_SCENARIO, pointOnRoute, photoScenarioSnapshot, scenarioBeaconReadings,
-} from '../shared/photo-scenario.js';
+  PHOTO_SCENARIO, pointOnRoute, photoScenarioSnapshot, scenarioBeaconReadings, positionAtTime } from '../shared/photo-scenario.js';
 import { RouteFollower } from '../mobile/src/route.js';
 
 let failed = 0;
@@ -18,10 +17,16 @@ const mappedBeacons = [
 ];
 const allBeacons = [...mappedBeacons, ...PHOTO_SCENARIO.routeBeacons];
 const start = photoScenarioSnapshot(startedAt, startedAt, allBeacons);
-const middle = photoScenarioSnapshot(startedAt, startedAt + 45_000, allBeacons);
-const end = photoScenarioSnapshot(startedAt, startedAt + 90_000, allBeacons);
+const D = PHOTO_SCENARIO.durationMs;
+const middle = photoScenarioSnapshot(startedAt, startedAt + D / 2, allBeacons);
+const end = photoScenarioSnapshot(startedAt, startedAt + D, allBeacons);
 
-expect('자동 대피 시간은 정확히 90초', PHOTO_SCENARIO.durationMs === 90_000);
+// 시간을 못 박지 않는다. **구간마다 더해서 나오는 값**이라,
+// 실측(첫 구간 9초)이나 걷는 속도를 고치면 총 시간도 같이 바뀌어야 한다.
+// 90초로 박아 두면 그 순간 시험이 «고치지 마라» 가 된다.
+expect('대피 시간이 구간 합과 맞는다',
+  Math.abs(PHOTO_SCENARIO.timeline.legs.reduce((a, l) => a + l.ms, 0) - D) < 1,
+  `${(D / 1000).toFixed(1)}초`);
 expect('현장 실측 63걸음·44.1m 축척 적용',
   PHOTO_SCENARIO.calibration.steps === 63 &&
   PHOTO_SCENARIO.calibration.walkedMeters === 44.1 &&
@@ -31,15 +36,18 @@ expect('굽은 파란 대피 경로는 실측 축척으로 약 66.3m',
   `${PHOTO_SCENARIO.totalMeters}m`);
 expect('0초에는 지정한 시작점',
   start.progress === 0 && start.x === PHOTO_SCENARIO.current[0] && start.y === PHOTO_SCENARIO.current[1]);
-expect('45초에는 경로 길이의 절반',
-  Math.abs(middle.progress - 0.5) < 1e-9 && middle.phase === 'guiding',
-  `(${middle.x.toFixed(1)}, ${middle.y.toFixed(1)})`);
-expect('90초에는 탈출구에 도착',
+// 절반 시간에 절반 거리가 아니다 — **꺾는 동안 시간만 가고 거리는 안 는다.**
+// 그게 이 모델의 요점이라, 「시간의 절반 = 거리의 절반」 을 요구하면 등속으로
+// 되돌아가라는 시험이 된다.
+expect('절반 시간에는 절반쯤 왔고 아직 가는 중',
+  middle.progress > 0.3 && middle.progress < 0.7 && middle.phase === 'guiding',
+  `진행률 ${(middle.progress * 100).toFixed(0)}% (${middle.x.toFixed(1)}, ${middle.y.toFixed(1)})`);
+expect('총 시간이 지나면 탈출구에 도착',
   end.progress === 1 && end.phase === 'arrived' && end.remainingMeters === 0);
 expect('도착 좌표는 파란 경로 마지막 점',
   end.x === PHOTO_SCENARIO.route.at(-1)[0] && end.y === PHOTO_SCENARIO.route.at(-1)[1]);
-expect('90초가 지나도 출구 밖으로 나가지 않음',
-  photoScenarioSnapshot(startedAt, startedAt + 180_000, allBeacons).progress === 1);
+expect('시간이 더 지나도 출구 밖으로 나가지 않음',
+  photoScenarioSnapshot(startedAt, startedAt + D * 2, allBeacons).progress === 1);
 
 // 점 사이 시간이 아니라 **걸어야 할 길이**로 보간하는지 확인한다.
 const quarter = pointOnRoute([[0, 0], [10, 0], [10, 30]], 0.25);

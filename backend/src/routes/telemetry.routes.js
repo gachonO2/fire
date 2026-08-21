@@ -50,6 +50,12 @@ function photoTimelinePayload(snapshot, extra = {}) {
     exitName: '비상구 (CREATIVE WORKSPACE 옆)',
     stepsLeft: snapshot.stepsLeft,
     remainingMeters: snapshot.remainingMeters,
+    // **지금 돌고 있는가.** 없으면 화면에서 점이 멈춘 것이 «끊겼나» 로
+    // 읽힌다. 시각장애인은 방향을 바꿀 때 서서 방위를 다시 잡으므로,
+    // 그 멈춤은 고장이 아니라 안내의 일부다.
+    turning: Boolean(snapshot.turning),
+    turnDeg: snapshot.turnDeg ?? 0,
+    elapsedMs: snapshot.elapsedMs,
     routeNodes: [PHOTO_SCENARIO.startNodeId, PHOTO_SCENARIO.exitNodeId],
     routeEdges: ['e7'],
     beacons: snapshot.beacons,
