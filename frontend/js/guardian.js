@@ -9,6 +9,7 @@
 
 import { Api } from './api.js';
 import { renderMap } from './minimap.js';
+import { escapeHtml } from './escape.js';
 
 const $ = id => document.getElementById(id);
 
@@ -136,10 +137,11 @@ function draw() {
 
 function renderAlerts(list) {
   const ul = $('g-alerts');
+  // 지점·출구 이름은 도면에서 온다(사진을 AI 가 읽어 만든 값). 그대로 넣지 않는다.
   ul.innerHTML = list?.length
     ? list.map(a => `<li>
-        <strong>${a.message}</strong>
-        <div class="time">${a.nodeName ?? ''} ${a.exitName ? `· 목표 ${a.exitName}` : ''} · ${new Date(a.ts).toLocaleTimeString('ko-KR')}</div>
+        <strong>${escapeHtml(a.message)}</strong>
+        <div class="time">${escapeHtml(a.nodeName ?? '')} ${a.exitName ? `· 목표 ${escapeHtml(a.exitName)}` : ''} · ${new Date(a.ts).toLocaleTimeString('ko-KR')}</div>
       </li>`).join('')
     : '<li class="empty">아직 없음</li>';
 }
