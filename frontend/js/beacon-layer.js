@@ -278,6 +278,17 @@ export function startBeaconWaves(waveSvg, getState) {
     waveSvg.innerHTML = '';
     if (!enabled || !floorPlan) return;
 
+    // **비콘이 등록되지 않은 도면에서는 아무것도 울리지 않는다.**
+    //
+    // `beaconPlacements` 는 등록된 비콘이 없으면 «지점마다 하나씩 있다고
+    // 치고» 가상 비콘을 돌려준다 — 폰 앱이 비콘 없는 건물에서도 측위를
+    // 흉내 내야 하기 때문이다. 그런데 관제에서 그걸 그대로 울리면 지점
+    // 62개가 전부 파동을 내서 도면이 파란 원으로 덮인다.
+    //
+    // 더 나쁜 것은 그게 **거짓말**이라는 점이다. 그 층에는 비콘이 한 대도
+    // 없는데 화면은 예순두 대가 울고 있다고 말한다.
+    if (!floorPlan.beaconNodes?.().length) return;
+
     const places = beaconPlacements(floorPlan);
     if (!places.length) return;
     const scale = planScale(floorPlan);

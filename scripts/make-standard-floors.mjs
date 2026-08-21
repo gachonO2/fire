@@ -407,6 +407,10 @@ for (const p of PLANS) {
   const sh = shell(nodes, edges, roomPolys, corridors);
   writeFileSync(new URL(`../backend/data/walls-${p.id}.json`, import.meta.url),
     JSON.stringify(sh));
+  // 방과 복도는 따로도 낸다. `extract-walls.py` 로 뽑은 벽과 합칠 때
+  // 쓴다 — 벽은 추출본이 정확하고 방 이름은 생성본에만 있다.
+  writeFileSync(new URL(`../backend/data/gen-rooms-${p.id}.json`, import.meta.url),
+    JSON.stringify({ rooms: sh.rooms, corridors: sh.corridors }));
 
   const exits = nodes.filter(n => n.type === 'exit').length;
   console.log(`  ${p.name.padEnd(20)} 지점 ${String(nodes.length).padStart(3)}`
