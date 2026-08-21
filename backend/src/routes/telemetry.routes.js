@@ -1,9 +1,9 @@
-import { Router } from 'express';
+import { asyncRouter } from './async-router.js';
 import { getRepo } from '../repositories/index.js';
 import { PHOTO_SCENARIO, photoScenarioSnapshot } from '../../../shared/photo-scenario.js';
 import { surveyedBeaconPlacements } from './beacons.routes.js';
 
-export const telemetryRoutes = Router();
+export const telemetryRoutes = asyncRouter();
 
 // ------------------------------------------------------------------- SOS
 telemetryRoutes.get('/sos', async (req, res) => {
