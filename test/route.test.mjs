@@ -70,6 +70,19 @@ const island = new FloorPlan({
 });
 expect('출구에 닿지 않는 지점 탐지', findUnreachableNodes(island).join() === 'ISO');
 
+// 엘리베이터로만 닿는 방은 화재 시 갈 곳이 없다 — 경로탐색이 엘리베이터를 늘
+// 빼기 때문이다. 이걸 "이어져 있다"고 하면 도면 검증이 통과시켜 버린다.
+const evOnly = new FloorPlan({
+  ...DEFAULT_PLAN,
+  nodes: [...DEFAULT_PLAN.nodes, { id: 'EVROOM', name: '엘리베이터로만 닿는 방', x: 30, y: 23.5, type: 'room' }],
+  edges: [...DEFAULT_PLAN.edges, { id: 'EEV', a: 'EV', b: 'EVROOM', elevator: true }],
+});
+expect('엘리베이터로만 닿는 방도 고립으로 본다',
+  findUnreachableNodes(evOnly).join() === 'EVROOM',
+  `→ ${findUnreachableNodes(evOnly).join() || '(없음)'}`);
+expect('엘리베이터 노드 자체는 경고하지 않는다',
+  findUnreachableNodes(new FloorPlan(DEFAULT_PLAN)).length === 0);
+
 // ---------------------------------------------------------- 온도 센서 반영
 const now = Date.now();
 const hot = hazardsFromSensors(
