@@ -46,9 +46,10 @@ const server = http.createServer(async (req, res) => {
     return res.end();
   }
 
-  // docs/ 밖으로 나가는 경로는 받지 않는다 (../ 로 저장소 전체가 열리는 것을 막는다)
+  // docs/ 밖으로 나가는 경로는 받지 않는다 (../ 로 저장소 전체가 열리는 것을 막는다).
+  // 구분자까지 함께 본다 — 접두사만 보면 docs 옆의 docs-private 이 통과한다.
   const target = path.join(DOCS, decodeURIComponent(pathname));
-  if (!target.startsWith(DOCS)) return send404(res);
+  if (target !== DOCS && !target.startsWith(DOCS + path.sep)) return send404(res);
 
   let file = target;
   try {
