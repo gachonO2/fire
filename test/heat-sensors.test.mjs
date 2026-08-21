@@ -8,7 +8,7 @@
  */
 
 import { strict as assert } from 'node:assert';
-import { detectorSpots, heatAt } from '../backend/src/heatSensors.js';
+import { CORRIDOR_SPACING_M, detectorSpots, heatAt } from '../backend/src/heatSensors.js';
 import { TEMP, temperatureHazard } from '../shared/hazard-rules.js';
 
 const tests = [];
@@ -111,6 +111,7 @@ test('긴 복도가 타면 그 복도의 감지기가 운다', () => {
 
 /** 기준층을 흉내낸 작은 도면 — 분기점 둘, 출구 하나, 엘리베이터 하나, 방 둘 */
 const PLAN = {
+  metersPerUnit: 1,          // 1 unit = 1m — 간격 계산을 눈으로 따라갈 수 있게
   nodes: [
     { id: 'J1', type: 'junction', name: '복도 1', x: 100, y: 100 },
     { id: 'J2', type: 'junction', name: '복도 2', x: 200, y: 100 },
@@ -153,11 +154,50 @@ test('회선 주소가 겹치지 않는다', () => {
 test('**어느 층 도면이든** 감지기가 붙는다', () => {
   // 예전에는 6층 지점 id 를 박아 뒀다. 그래서 다른 층을 열면 한 대도 안
   // 붙었고, 감지기가 6층에만 있는 것처럼 보였다.
-  const other = { nodes: [
+  const other = { metersPerUnit: 0.1, nodes: [
     { id: 'N0', type: 'junction', name: '북쪽 복도 1', x: 10, y: 10 },
     { id: 'EXIT_E', type: 'exit', name: '동쪽 계단', x: 90, y: 10 },
   ] };
-  assert.equal(detectorSpots(other).length, 4);   // 두 자리 × 두 종류
+  const spots = detectorSpots(other);
+  assert.ok(spots.length > 0, '다른 층 도면에 한 대도 안 붙었다');
+  // 계단은 무조건 붙는다. 8m 옆 분기점은 30m 간격에 걸려 솎인다 — 맞는 동작이다.
+  assert.ok(spots.some(s => s.nodeId === 'EXIT_E'));
+});
+
+test('복도는 30m 간격으로 솎는다', () => {
+  // 도면의 «분기점» 은 경로를 풀려고 13m 마다 찍어 둔 점이지 감지기를 달
+  // 자리가 아니다. 전부 달면 기준층 하나에 쉰두 대가 붙는데, 실제 건물은
+  // 그렇지 않다 — NFTC 203 은 복도 연기감지기를 보행거리 30m 마다 둔다.
+  const dense = { metersPerUnit: 1, nodes: [] };
+  for (let i = 0; i <= 130; i += 13) {           // 130m 복도에 13m 마다 열한 점
+    dense.nodes.push({ id: `J${i}`, type: 'junction', name: `복도 ${i}`, x: i, y: 0 });
+  }
+  const spots = detectorSpots(dense);
+  const places = new Set(spots.map(s => s.nodeId)).size;
+  assert.ok(places <= Math.ceil(130 / CORRIDOR_SPACING_M) + 1,
+    `130m 복도에 ${places}곳이나 달았다`);
+  assert.ok(places >= 4, `130m 복도에 ${places}곳뿐이다 — 너무 성기다`);
+});
+
+test('계단·엘리베이터는 간격과 상관없이 무조건 단다', () => {
+  // 수직 통로는 연기가 굴뚝처럼 오르는 곳이라 빠뜨리면 안 된다.
+  const tight = { metersPerUnit: 1, nodes: [
+    { id: 'J0', type: 'junction', name: '복도', x: 0, y: 0 },
+    { id: 'E0', type: 'exit', name: '계단', x: 1, y: 0 },        // 1m 옆
+    { id: 'EV', type: 'elevator', name: '엘리베이터', x: 2, y: 0 },
+  ] };
+  const places = new Set(detectorSpots(tight).map(s => s.nodeId));
+  assert.ok(places.has('E0'), '계단을 빠뜨렸다');
+  assert.ok(places.has('EV'), '엘리베이터를 빠뜨렸다');
+});
+
+test('회선 주소는 도면 순서를 따른다', () => {
+  // 고른 순서(출구 먼저)로 매기면 도면을 다시 읽을 때마다 같은 기기의
+  // 주소가 바뀌어, 무전으로 부르던 이름이 어제와 달라진다.
+  const spots = detectorSpots(PLAN);
+  const seen = spots.filter(s => s.kind === 'smoke').map(s => s.nodeId);
+  const order = PLAN.nodes.map(n => n.id).filter(id => seen.includes(id));
+  assert.deepEqual(seen, order);
 });
 
 test('도면이 없으면 감지기도 없다', () => {
