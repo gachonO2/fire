@@ -76,6 +76,10 @@ export function renderMap(svg, state = {}) {
 
   svg.innerHTML = '';
   if (!floorPlan) return;
+  // 도면이 등록되기 전의 기본 상태다. 지점이 없으면 Math.min(...[]) 이 Infinity 라
+  // viewBox 가 "Infinity Infinity NaN NaN" 이 되고, 브라우저가 매 렌더마다 거부한다.
+  // 그릴 것이 없을 때는 빈 그림으로 둔다.
+  if (floorPlan.nodes.length === 0 && !floorPlan.image?.width) return;
 
   const el = (tag, attrs, parent = svg) => {
     const e = document.createElementNS(NS, tag);
