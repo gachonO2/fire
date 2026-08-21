@@ -1,10 +1,10 @@
-import { Router } from 'express';
+import { asyncRouter } from './async-router.js';
 import { activeFloorPlan, currentHazards } from '../floor.js';
 import { getRepo } from '../repositories/index.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { tick as heatTick } from '../heatSensors.js';
 
-export const hazardRoutes = Router();
+export const hazardRoutes = asyncRouter();
 
 const VALID_TYPES = ['fire', 'smoke', 'crowd', 'blocked'];
 const LABELS = { fire: '화재 발생', smoke: '연기 감지', crowd: '혼잡', blocked: '통로 차단' };
@@ -78,6 +78,12 @@ hazardRoutes.post('/sensors/fire-panel', async (req, res) => {
   const floorPlan = await activeFloorPlan();
   if (!floorPlan) return res.status(404).json({ error: '등록된 도면이 없습니다. 먼저 피난안내도를 등록하고 활성화해주세요.' });
   if (!floorPlan.hasEdge(edgeId)) return res.status(404).json({ error: `알 수 없는 통로: ${edgeId}` });
+  // 모르는 유형은 **거부한다.** 저장은 되지만 경로탐색이 보는 위험 맵(mergeHazards)에서는
+  // 조용히 빠지기 때문에, 관제 화면에는 막힌 통로가 떠 있는데 앱은 그리로 안내하게 된다.
+  // 수신기가 새 유형을 보내기 시작했다면 그건 무시할 일이 아니라 알아야 할 일이다.
+  if (!VALID_TYPES.includes(type)) {
+    return res.status(400).json({ error: `type은 ${VALID_TYPES.join(', ')} 중 하나여야 합니다.` });
+  }
 
   const repo = await getRepo();
   if (active) await repo.setHazard(edgeId, { type, label: LABELS[type] || '센서 감지', sensorId });
