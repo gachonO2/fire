@@ -101,7 +101,9 @@ function standardFloor(floor, opts = {}) {
   const edges = [];
   const rooms = [];
   const link = (a, b) => edges.push({ id: `e${edges.length + 1}`, a, b, wall: null });
-  const put = pts => rooms.push(pts.map(([x, y]) => [m(x), m(y)]));
+  const corridors = [];
+  const put = (pts, name) => rooms.push({ pts: pts.map(([x, y]) => [m(x), m(y)]), name });
+  const band = pts => corridors.push(pts.map(([x, y]) => [m(x), m(y)]));
 
   // 외벽 → 방(10m) → 복도(12.6m) 순서라야 방문이 복도로 난다.
   const D_ROOM = 10.0;
@@ -136,7 +138,7 @@ function standardFloor(floor, opts = {}) {
     nodes.push(node(`NR${i}`, 'room', name, rx, ry, { area: 84 }));
     link(id, `NR${i}`);
     // 이웃과 변을 맞댄 사다리꼴 — 떨어뜨리면 «허공에 뜬 상자» 가 된다
-    rooms.push([onDiag(t, 0), onDiag(t2, 0), onDiag(t2, D_ROOM), onDiag(t, D_ROOM)]);
+    rooms.push({ pts: [onDiag(t, 0), onDiag(t2, 0), onDiag(t2, D_ROOM), onDiag(t, D_ROOM)], name });
   }
 
   // ── 남쪽 강의실과 계단 — 남쪽 외벽에 붙어 연속
@@ -163,11 +165,14 @@ function standardFloor(floor, opts = {}) {
     const kind = S_BAND[i];
     const x2 = sFrom + ((sTo - sFrom) * (i + 1)) / S_BAND.length;
     const isStair = kind === 'exit';
-    const name = isStair ? `남쪽 계단 ${++stairNo}` : `${floor}.${roomNo++} 강의실`;
+    // **계단이 곧 비상구다.** 6층과 같은 이름 규칙을 쓴다 —
+    // 「비상구 (…)」 로 통일해야 안내 음성이 층마다 다른 말을 안 한다.
+    const name = isStair
+      ? `비상구 (남쪽 계단 ${++stairNo})` : `${floor}.${roomNo++} 강의실`;
     nodes.push(node(`SR${i}`, kind, name,
       m((x + x2) / 2), m(M_H - D_ROOM / 2), isStair ? { area: 28 } : { area: 84 }));
     link(id, `SR${i}`);
-    put([[x, M_H - D_ROOM], [x2, M_H - D_ROOM], [x2, M_H], [x, M_H]]);
+    put([[x, M_H - D_ROOM], [x2, M_H - D_ROOM], [x2, M_H], [x, M_H]], name);
   }
 
   // ── 동쪽 블록 — 계단식강의실 둘과 강의실 셋.
@@ -187,34 +192,37 @@ function standardFloor(floor, opts = {}) {
   for (const [id, name, y0, y1, area] of EAST) {
     nodes.push(node(id, 'room', name, m((EAST_X + M_W) / 2), m((y0 + y1) / 2), { area }));
     link('E_HALL', id);
-    put([[EAST_X, y0], [M_W, y0], [M_W, y1], [EAST_X, y1]]);
+    put([[EAST_X, y0], [M_W, y0], [M_W, y1], [EAST_X, y1]], name);
   }
 
   // 코어 — 계단·엘리베이터·화장실. 동쪽 홀 바로 옆이다.
-  nodes.push(node('EXIT_E', 'exit', '동쪽 계단', m(EAST_X - 5.6), m(12.0), { area: 28 }));
+  nodes.push(node('EXIT_E', 'exit', '비상구 (동쪽 계단)', m(EAST_X - 5.6), m(12.0), { area: 28 }));
   nodes.push(node('ELEV', 'elevator', '엘리베이터', m(EAST_X - 5.6), m(16.4)));
   nodes.push(node('WC', 'room', '화장실', m(EAST_X - 5.6), m(21.0), { area: 40 }));
-  for (const id of ['EXIT_E', 'ELEV', 'WC']) link('E_HALL', id);
-  put([[EAST_X - 8.4, 9.6], [EAST_X, 9.6], [EAST_X, 23.4], [EAST_X - 8.4, 23.4]]);
+  // 도면의 코어에는 계단이 둘이다 — 승강기를 사이에 두고 위아래.
+  // 화재 시 승강기를 못 쓰므로 이 둘이 동쪽 대피의 전부다.
+  nodes.push(node('EXIT_NE', 'exit', '비상구 (북동 계단)', m(EAST_X - 5.6), m(25.4), { area: 28 }));
+  for (const id of ['EXIT_E', 'ELEV', 'WC', 'EXIT_NE']) link('E_HALL', id);
+  put([[EAST_X - 8.4, 9.6], [EAST_X, 9.6], [EAST_X, 23.4], [EAST_X - 8.4, 23.4]], '코어');
 
   // ── 가운데 — 스터디 아룸파(120㎡). 나머지는 하부 오픈이라 방이 아니다.
   if (!opts.half) {
     const mid = Math.round(sCorr.length / 2);
     nodes.push(node('STUDY', 'room', '스터디 아룸파', m(34.0), m(19.0), { area: 120 }));
     link(sCorr[mid], 'STUDY');
-    put([[29.0, 15.5], [41.0, 15.5], [41.0, 22.5], [29.0, 22.5]]);
+    put([[29.0, 15.5], [41.0, 15.5], [41.0, 22.5], [29.0, 22.5]], '스터디 아룸파');
   }
 
   // ── 서쪽 끝 — 계단(28㎡)과 휴게공간(62㎡)
   if (!opts.half) {
-    nodes.push(node('EXIT_W', 'exit', '서쪽 계단', m(7.4), m(23.0), { area: 28 }));
+    nodes.push(node('EXIT_W', 'exit', '비상구 (서쪽 계단)', m(7.4), m(23.0), { area: 28 }));
     link('EXIT_W', nCorr[N_ROOMS]);
     link('EXIT_W', sCorr[0]);
-    put([[4.6, 20.4], [10.4, 20.4], [10.4, 25.4], [4.6, 25.4]]);
+    put([[4.6, 20.4], [10.4, 20.4], [10.4, 25.4], [4.6, 25.4]], '서쪽 계단');
 
     nodes.push(node('LOUNGE', 'room', '휴게공간', m(8.0), m(28.6), { area: 62 }));
     link('LOUNGE', sCorr[0]);
-    put([[4.2, 25.6], [12.0, 25.6], [12.0, M_H - D_ROOM], [4.2, M_H - D_ROOM]]);
+    put([[4.2, 25.6], [12.0, 25.6], [12.0, M_H - D_ROOM], [4.2, M_H - D_ROOM]], '휴게공간');
   } else {
     // 1층은 서쪽이 지반에 묻혀 있어 서쪽 계단이 없다 — 대피가 동쪽으로만 열린다
     link(nCorr[N_ROOMS], sCorr[0]);
@@ -235,7 +243,30 @@ function standardFloor(floor, opts = {}) {
     link('BRIDGE', sCorr[sm]);
   }
 
-  return { nodes, edges, rooms };
+  // ── **복도를 면으로 그린다.**
+  //
+  // 여태 복도는 지점을 잇는 선일 뿐이라 화면에서 «방과 방 사이 빈 곳» 으로
+  // 보였다. 6층은 도면 사진이 깔려 있어 「NORTH STREET」 글자와 바닥 무늬가
+  // 복도를 말해 주는데, 생성한 층에는 그 사진이 없다. 없으면 그려야 한다.
+  //
+  // 폭은 방 끝(10m)에서 복도 중심(12.6m) 너머까지 — 실제 복도 폭 2.6m 다.
+  band([onDiag(tStart, D_ROOM), onDiag(tEnd, D_ROOM),
+    onDiag(tEnd, D_ROOM + 2.6), onDiag(tStart, D_ROOM + 2.6)]);
+  band([[sFrom, M_H - D_ROOM - 2.6], [sTo, M_H - D_ROOM - 2.6],
+    [sTo, M_H - D_ROOM], [sFrom, M_H - D_ROOM]]);
+  // 동쪽 홀 — 두 복도를 잇는 세로 통로
+  band([[EAST_X - 3.6, 6.0], [EAST_X - 1.0, 6.0],
+    [EAST_X - 1.0, M_H - D_ROOM], [EAST_X - 3.6, M_H - D_ROOM]]);
+  if (opts.bridge) {
+    const nm = Math.round(N_ROOMS / 2);
+    const sm = Math.round(sCorr.length / 2);
+    const a = nodes.find(n => n.id === nCorr[nm]);
+    const b = nodes.find(n => n.id === sCorr[sm]);
+    corridors.push([[a.x - m(1.3), a.y], [a.x + m(1.3), a.y],
+      [b.x + m(1.3), b.y], [b.x - m(1.3), b.y]]);
+  }
+
+  return { nodes, edges, rooms, corridors };
 }
 
 /** 옥탑 — 옥상으로 나가는 층. 계단과 기계실뿐이다. */
@@ -253,7 +284,9 @@ function penthouse() {
   ];
   return {
     nodes, edges,
-    rooms: [[[m(62), m(5)], [m(M_W), m(5)], [m(M_W), m(14)], [m(62), m(14)]]],
+    rooms: [{ pts: [[m(62), m(5)], [m(M_W), m(5)], [m(M_W), m(14)], [m(62), m(14)]],
+      name: '기계실' }],
+    corridors: [[[m(56), m(15.6)], [m(72), m(15.6)], [m(72), m(18.4)], [m(56), m(18.4)]]],
   };
 }
 
@@ -263,7 +296,7 @@ function penthouse() {
  * 관제는 세 가지를 따로 받는다 — 지점 그래프(경로용), 벽·방(그림용),
  * 격자(선이 벽을 안 뚫게). 지점만 올리면 화면이 텅 빈 판이 된다.
  */
-function shell(nodes, edges, roomPolys) {
+function shell(nodes, edges, roomPolys, corridorPolys = []) {
   const rooms = [];
   const walls = [];
   const seen = new Set();
@@ -277,7 +310,7 @@ function shell(nodes, edges, roomPolys) {
       x2: Math.round(b[0]), y2: Math.round(b[1]) });
   };
 
-  for (const pts of roomPolys) {
+  for (const { pts, name } of roomPolys) {
     const p = pts.map(([x, y]) => [Math.round(x), Math.round(y)]);
     let a2 = 0;
     for (let i = 0; i < p.length; i++) {
@@ -286,7 +319,7 @@ function shell(nodes, edges, roomPolys) {
       push(p[i], q);
     }
     rooms.push({
-      points: p, area: Math.abs(a2) / 2,
+      points: p, name, area: Math.abs(a2) / 2,
       cx: p.reduce((s, q) => s + q[0], 0) / p.length,
       cy: p.reduce((s, q) => s + q[1], 0) / p.length,
     });
@@ -326,6 +359,8 @@ function shell(nodes, edges, roomPolys) {
   const str = a => Array.from(a, v => (v ? '1' : '0')).join('');
   return {
     width: W, height: H, walls, rooms, footprint: FOOT,
+    // 복도는 방과 따로 낸다 — 화면에서 다른 색으로 칠해야 «길» 로 읽힌다
+    corridors: corridorPolys.map(pts => pts.map(([x, y]) => [Math.round(x), Math.round(y)])),
     grid: { w: GW, h: GH, cells: str(cells), corridor: str(corr), marked: str(corr) },
   };
 }
@@ -353,7 +388,7 @@ const PLANS = [
 
 console.log(`  건물 ${M_W}m × ${M_H}m · 축척 ${METERS_PER_UNIT} m/unit (도면 실측)`);
 for (const p of PLANS) {
-  const { nodes, edges, rooms: roomPolys = [] } = p.build();
+  const { nodes, edges, rooms: roomPolys = [], corridors = [] } = p.build();
   // 도면 밖으로 나간 지점이 하나라도 있으면 멈춘다 — 화면에서 «벽을 뚫은»
   // 것으로 보이는 그 상태다. 눈으로 찾지 말고 여기서 잡는다.
   const outside = nodes.filter(n => n.x < 0 || n.y < 0 || n.x > W || n.y > H);
@@ -369,7 +404,7 @@ for (const p of PLANS) {
     edges,
   };
   const r = await post('/plans', plan);
-  const sh = shell(nodes, edges, roomPolys);
+  const sh = shell(nodes, edges, roomPolys, corridors);
   writeFileSync(new URL(`../backend/data/walls-${p.id}.json`, import.meta.url),
     JSON.stringify(sh));
 
@@ -377,5 +412,6 @@ for (const p of PLANS) {
   console.log(`  ${p.name.padEnd(20)} 지점 ${String(nodes.length).padStart(3)}`
     + ` · 통로 ${String(edges.length).padStart(3)} · 출구 ${exits}`
     + ` · 벽 ${String(sh.walls.length).padStart(3)} · 방 ${String(sh.rooms.length).padStart(2)}`
+    + ` · 복도 ${sh.corridors.length}`
     + `${r.warnings?.length ? `  ⚠ ${r.warnings.join(', ')}` : ''}`);
 }
