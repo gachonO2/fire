@@ -1,11 +1,11 @@
-import { Router } from 'express';
+import { asyncRouter } from './async-router.js';
 import { TEMP, temperatureHazard, isStale, HAZARD_RULES } from '../../../shared/hazard-rules.js';
 import { tick as heatTick } from '../heatSensors.js';
 import { SPEC, VERIFY_MS, panelSummary } from '../../../shared/detectors.js';
 import { activeFloorPlan } from '../floor.js';
 import { getRepo } from '../repositories/index.js';
 
-export const sensorRoutes = Router();
+export const sensorRoutes = asyncRouter();
 
 /**
  * 온도 센서 판독값 수집.
