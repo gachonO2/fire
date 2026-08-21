@@ -28,6 +28,7 @@ const BASE = new URLSearchParams(location.search).get('api') || '';
 
 const CACHE_KEY = 'fireguide:hazards';
 const PLAN_CACHE_KEY = 'fireguide:plan';
+const IMAGE_CACHE_KEY = 'fireguide:planImage';
 
 export class Api {
   /** @param {{code?: string}} opts code를 주면 보호자 스코프로 스트림을 구독한다 */
@@ -44,8 +45,12 @@ export class Api {
 
     // 통신이 끊겨도 안내를 이어가려면 도면이 손에 있어야 한다.
     // 마지막으로 받은 도면 → 없으면 빈 도면. 예제 건물로 채우지 않는다.
-    this.floorPlan = new FloorPlan(this._loadPlanCache() || EMPTY_PLAN);
+    //
+    // backgroundImage 를 **먼저** 비운다. _loadPlanCache 가 캐시된 이미지를 여기에
+    // 되살리는데, 그 뒤에 null 을 넣으면 방금 되살린 것을 도로 지운다 —
+    // 그래서 오프라인에서 도면 사진이 한 번도 안 보였다.
     this.backgroundImage = null;
+    this.floorPlan = new FloorPlan(this._loadPlanCache() || EMPTY_PLAN);
   }
 
   /** 안내에 쓸 수 있는 도면이 있는가 (출구가 하나라도 있어야 한다) */
@@ -84,6 +89,14 @@ export class Api {
    */
   skipPlanImage = false;
 
+  /**
+   * 도면 이미지는 **어느 도면의 것인지와 함께** 저장한다.
+   *
+   * 예전에는 이미지만 한 칸에 넣어 뒀다. 그래서 관제가 다른 건물로 바꿨는데 그
+   * 건물의 이미지를 못 받아오면, 다음에 켤 때 새 도면의 그래프 밑에 **이전 건물의
+   * 평면도 사진**이 깔렸다. 지도를 보는 사람(안전요원·보호자)은 그게 다른 건물인
+   * 줄 모른다.
+   */
   async _loadPlanImage(planId) {
     // 사진을 건너뛰더라도 **`plan` 은 반드시 쏜다.**
     //
@@ -98,9 +111,11 @@ export class Api {
     try {
       const { dataUri } = await this._fetch(`/api/plans/${encodeURIComponent(planId)}/image`);
       this.backgroundImage = dataUri;
-      try { localStorage.setItem('fireguide:planImage', dataUri); } catch (_) {}
+      try { localStorage.setItem(IMAGE_CACHE_KEY, JSON.stringify({ planId, dataUri })); } catch (_) {}
     } catch (_) {
-      this.backgroundImage = null; // 등록된 도면 이미지 없음
+      // 등록된 도면 이미지 없음 — 남아 있던 이전 건물 사진도 함께 버린다
+      this.backgroundImage = null;
+      try { localStorage.removeItem(IMAGE_CACHE_KEY); } catch (_) {}
     }
     this._emit('plan', this.floorPlan.toJSON());
   }
@@ -192,7 +207,16 @@ export class Api {
       });
       this._setOnline(true);
       return { ...res, offline: false };
-    } catch (_) {
+    } catch (err) {
+      // 서버가 **4xx로 거절했다면 그건 판단이지 장애가 아니다.**
+      // "등록된 도면이 없습니다"(404)·"알 수 없는 시작 노드"(400)는 손에 든 캐시
+      // 도면이 지금 건물과 다르다는 뜻이다. 그걸 무시하고 로컬 계산으로 넘어가면
+      // 앱이 **다른 건물의 복도를 안내한다** — 이 앱에서 제일 위험한 실패다.
+      // 5xx(서버 고장)와 통신 두절만 캐시 도면으로 이어간다.
+      if (err.status >= 400 && err.status < 500) {
+        this._setOnline(true);
+        return { route: null, ms: 0, offline: false, reason: err.message };
+      }
       this._setOnline(false);
       const t0 = performance.now();
       const local = routeToNearestExit(this.floorPlan, from, this.hazards);
@@ -354,12 +378,20 @@ export class Api {
   }
 
   // ---------------------------------------------------------------- 내부
+  /**
+   * 던지는 오류에 `status` 를 붙인다 — **서버가 답을 했는지** 구분하기 위해서다.
+   * status 가 없으면 서버에 닿지 못한 것(오프라인), 있으면 서버가 판단해서 거절한 것이다.
+   * 이 둘을 뭉뚱그리면 "도면이 없다"는 서버의 답을 통신 장애로 착각한다.
+   */
   async _fetch(pathname, opts = {}) {
     const res = await fetch(BASE + pathname, {
       headers: { 'Content-Type': 'application/json' },
       ...opts,
     });
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw Object.assign(new Error(body.error || res.statusText), { status: res.status });
+    }
     return res.json();
   }
 
@@ -373,11 +405,21 @@ export class Api {
   }
 
   _loadPlanCache() {
+    let plan = null;
+    try { plan = JSON.parse(localStorage.getItem(PLAN_CACHE_KEY)); } catch (_) {}
+
+    // 이미지는 **따로** 읽는다. 같이 읽으면 이미지 쪽이 깨졌을 때 도면까지 버려진다 —
+    // 예전 판이 남긴 날 문자열이 그런 경우다. 도면은 통신이 끊겼을 때 안내를
+    // 이어가는 마지막 수단이라, 배경 그림 때문에 잃어서는 안 된다.
+    this.backgroundImage = null;
     try {
-      const plan = JSON.parse(localStorage.getItem(PLAN_CACHE_KEY));
-      this.backgroundImage = localStorage.getItem('fireguide:planImage') || null;
-      return plan;
-    } catch (_) { return null; }
+      // 같은 도면의 것일 때만 되살린다 — 아니면 남의 건물 평면도가 깔린다
+      const cached = JSON.parse(localStorage.getItem(IMAGE_CACHE_KEY) || 'null');
+      if (cached?.planId && cached.planId === plan?.id) this.backgroundImage = cached.dataUri;
+    } catch (_) {
+      localStorage.removeItem(IMAGE_CACHE_KEY); // 옛 형식 — 다음 접속 때 다시 받는다
+    }
+    return plan;
   }
 
   _savePlanCache(plan) {
