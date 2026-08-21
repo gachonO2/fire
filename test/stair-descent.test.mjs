@@ -8,7 +8,7 @@
 
 import { strict as assert } from 'node:assert';
 import {
-  DESCENT_PHASE, GROUND_FLOOR, StairDescent, floorOf,
+  AI_HALL_EXIT_LEVELS, DESCENT_PHASE, GROUND_FLOOR, StairDescent, floorOf,
 } from '../shared/stair-descent.js';
 
 const tests = [];
@@ -156,6 +156,75 @@ test('아무 변화가 없으면 아무 말도 안 한다', () => {
   d.reachExit();
   assert.equal(d.push(null).say, undefined);
   assert.equal(d.push({ kind: 'stair', floors: 0 }).say, undefined);
+});
+
+/* ── 경사지 건물 — 지상이 두 군데다 ─────────────────────────
+ *
+ * 이 건물은 옥상이 운동장과 이어지고 엘리베이터와 직결된다. 그러면 옥상은
+ * «최후의 피난처» 가 아니라 또 하나의 지상 출입구다. 위층 사람에게는 위로
+ * 한 층이 아래로 일곱 층보다 짧고, 연기가 굴뚝처럼 오르는 계단실을 덜
+ * 지난다. */
+const HILL = { exitLevels: AI_HALL_EXIT_LEVELS };   // [1, 8] — 1층과 옥상
+
+test('경사지 건물 — 위층은 옥상으로 보낸다', () => {
+  const d = new StairDescent(7, HILL);
+  assert.equal(d.target, 8);
+  assert.ok(d.goingUp);
+  assert.equal(d.floorsLeft, 1, '7층에서 옥상까지 한 층이다');
+  const r = d.reachExit();
+  assert.match(r.say, /올라가세요/);
+  assert.match(r.say, /1개 층/);
+});
+
+test('위로 보낼 때는 «왜» 를 말한다', () => {
+  // 「불났는데 올라가라고?」 는 사람이 안 따르는 안내이고, 안 따르면 안내가 아니다.
+  const r = new StairDescent(7, HILL).reachExit();
+  assert.match(r.say, /옥상이 운동장과 이어져/);
+});
+
+test('경사지 건물 — 아래층은 그대로 1층으로', () => {
+  const d = new StairDescent(3, HILL);
+  assert.equal(d.target, 1);
+  assert.ok(!d.goingUp);
+  assert.equal(d.floorsLeft, 2);
+  assert.match(d.reachExit().say, /내려가세요/);
+});
+
+test('한가운데 층은 가까운 쪽으로 — 여기서는 아래', () => {
+  // 4층: 1층까지 3개 층, 옥상까지 4개 층. 아래가 가깝다.
+  const d = new StairDescent(4, HILL);
+  assert.equal(d.target, 1);
+});
+
+test('옥상으로 올라가면 층수가 줄어든다', () => {
+  const d = new StairDescent(7, HILL);
+  d.reachExit();
+  const r = d.push({ kind: 'stair', floors: +1 });
+  assert.equal(d.floor, 8);
+  assert.equal(d.floorsLeft, 0);
+  assert.equal(d.phase, DESCENT_PHASE.GROUND);
+  assert.match(r.say, /옥상입니다/);
+  assert.ok(!d.done, '옥상에 닿았다고 대피 완료라고 했다');
+  d.markOut();
+  assert.ok(d.done);
+});
+
+test('목표를 지나쳐 세지 않는다', () => {
+  // 1층으로 내려가는 사람이 지하로 더 내려가도 «남은 층수 음수» 가 되면 안 된다.
+  const d = new StairDescent(3, HILL);
+  d.reachExit();
+  for (let i = 0; i < 6; i++) d.push({ kind: 'stair', floors: -1 });
+  assert.equal(d.floor, 1);
+  assert.equal(d.floorsLeft, 0);
+});
+
+test('확인 안 된 건물은 옥상을 출구로 안 친다', () => {
+  // **이게 기본값이어야 한다.** 옥상 연결은 건물마다 사람이 확인해야 하는
+  // 값이고, 틀리면 사람을 막다른 옥상으로 올려보낸다.
+  const d = new StairDescent(7);
+  assert.equal(d.target, GROUND_FLOOR);
+  assert.ok(!d.goingUp);
+  assert.match(d.reachExit().say, /내려가세요/);
 });
 
 let pass = 0;

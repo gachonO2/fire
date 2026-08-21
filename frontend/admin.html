@@ -448,6 +448,117 @@
     .map-stack #pick-layer circle { pointer-events: auto; }
     .map-stack #pick-layer circle { cursor: pointer; }
 
+    /* ── 건물 층 스택 ────────────────────────────────────
+       **없는 층을 정상으로 칠하지 않는다.** 도면을 안 올린 층을 초록으로
+       두면 관제가 그 층을 보고 있다고 착각한다 — 실제로는 아무것도 안
+       보고 있는데. 상태를 셋으로 갈라 색과 글씨로 같이 말한다. */
+    .tower {
+      position: absolute; left: 14px; bottom: 14px; z-index: 6;
+      background: rgba(16,20,27,.82); backdrop-filter: blur(8px);
+      border: 1px solid var(--line); border-radius: 12px;
+      padding: 9px 11px 10px; width: 250px;
+    }
+    /* **모형과 목록을 나란히 둔다.**
+       세로로 쌓았더니 위젯이 370px 이 되어 지도 왼쪽을 절반이나 덮었다.
+       모형은 «어디쯤인지» 를 공간으로, 목록은 «무엇인지» 를 글씨로 말하므로
+       같은 높이에 놓아도 서로 안 밟는다. */
+    .tower-body { display: grid; grid-template-columns: 96px 1fr; gap: 8px; align-items: center; }
+    .tower-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; }
+    .tower-head b { font-size: 12px; font-weight: 700; }
+    .tower-head span { font-size: 10.5px; color: var(--muted); }
+
+    /* ── 건물 3D 모형 ────────────────────────────────────
+       층을 **실제 외곽선 모양으로** 쌓는다. 이 건물은 긴 쐐기꼴이라
+       네모로 쌓으면 어느 건물인지 알아볼 수 없다. 외곽선은 도면 사진에서
+       뽑은 것과 같은 값이다(`scripts/extract-walls.py` 의 footprint).
+
+       기울기는 사진과 같은 방향으로 맞춘다 — 왼쪽 아래가 앞, 오른쪽 위가
+       뒤. 그래야 실물 사진을 본 사람이 같은 건물로 읽는다. */
+    .tower-3d {
+      height: 132px; margin: 0;
+      perspective: 900px; perspective-origin: 50% 46%;
+    }
+    .tower-in {
+      position: relative; width: 100%; height: 100%;
+      transform-style: preserve-3d;
+      /* 기울기를 58도로 둔다. 더 눕히면(64도) 층 사이가 붙어 일곱 장이
+         한 덩어리로 보이고, 더 세우면 외곽선의 쐐기 모양이 사라진다. */
+      transform: rotateX(58deg) rotateZ(-36deg) scale(.62);
+    }
+    .tower-in .lv {
+      position: absolute; left: 6%; top: 18%; width: 88%; height: 46%;
+      /* 도면 외곽선 그대로. 층마다 다시 계산하지 않는다 — 같은 건물이다. */
+      clip-path: polygon(99.93% 0%, 91.94% 0%, 91.64% 6.13%, 15.53% 49.72%,
+                         14.64% 50.97%, 3.18% 57.66%, 0% 57.66%, 0% 99.86%, 99.93% 99.86%);
+      background: var(--lv-bg, rgba(120,132,148,.28));
+      /* 테두리 한 줄로 «판» 이 된다. 없으면 색 얼룩 일곱 개로 보인다. */
+      outline: 1px solid var(--lv-line, rgba(190,200,214,.5));
+      outline-offset: -1px;
+      transform: translateZ(var(--z));
+      transition: background .25s ease;
+      cursor: default;
+    }
+    .tower-in .lv[data-can="1"] { cursor: pointer; }
+    /* 층 상태 — 스택 목록과 **같은 색**을 쓴다. 두 곳이 다른 색을 쓰면
+       어느 쪽을 믿을지 사람이 정해야 한다. */
+    .tower-in .lv[data-state="watched"]   { --lv-bg: rgba(47,214,166,.26);  --lv-line: rgba(47,214,166,.75); }
+    .tower-in .lv[data-state="plan-only"] { --lv-bg: rgba(77,159,255,.22);  --lv-line: rgba(77,159,255,.6); }
+    .tower-in .lv[data-state="none"]      { --lv-bg: rgba(120,132,148,.14); --lv-line: rgba(150,160,174,.32); }
+    .tower-in .lv[data-state="fire"] {
+      --lv-bg: rgba(255,68,56,.55); --lv-line: var(--danger);
+      animation: floorPulse 1.2s ease-in-out infinite;
+    }
+    /* 지금 보고 있는 층 — 밝게 띄우고 흰 테로 짚는다 */
+    .tower-in .lv.on {
+      --lv-line: #fff;
+      box-shadow: 0 0 0 1px rgba(255,255,255,.55);
+      filter: brightness(1.5);
+    }
+    /* 층을 위에서 아래로 쌓는다. 살짝 어긋나게 놓아 «겹쳐 쌓인 판» 으로
+       읽히게 하되, 기울이지는 않는다 — 작은 위젯에서 원근을 주면 아래층
+       글씨가 찌그러져 못 읽는다. */
+    .tower-stack { display: flex; flex-direction: column; gap: 1px; }
+    .floor {
+      display: grid; grid-template-columns: 24px 1fr; align-items: center;
+      gap: 5px; padding: 1px 4px; border-radius: 4px;
+      background: none; border: 0; width: 100%; text-align: left;
+      color: var(--muted); font: inherit; font-size: 10.5px; cursor: default;
+    }
+    .floor .n { font-weight: 700; font-variant-numeric: tabular-nums; }
+    /* 층 슬래브 — 실제 도면 외곽선을 쓰지 않고 단순한 판으로 둔다.
+       12px 높이에서는 어떤 외곽선도 얼룩이 된다. */
+    /* 좁은 칸에서는 슬래브 막대를 뺀다 — 3D 모형이 이미 «판» 을 보여 준다.
+       같은 것을 두 번 그리면 자리만 먹는다. */
+    .floor .slabline { display: none; }
+    .floor .slabline-unused {
+      height: 8px; border-radius: 2px;
+      background: var(--line-2); border: 1px solid var(--line);
+      transform: skewX(-24deg);
+    }
+    .floor .st { font-size: 10.5px; }
+    .floor[data-can="1"] { cursor: pointer; }
+    .floor[data-can="1"]:hover { background: rgba(255,255,255,.05); }
+    .floor[data-state="watched"] .st { color: var(--ok); }
+    .floor[data-state="plan-only"] .st { color: var(--route); }
+    .floor[data-state="none"] .st { color: var(--faint); }
+    .floor[data-state="fire"] .st { color: var(--danger); font-weight: 800; }
+    .floor[data-state="watched"] .slabline {
+      background: rgba(47,214,166,.5); border-color: var(--ok);
+    }
+    .floor[data-state="plan-only"] .slabline {
+      background: rgba(77,159,255,.28); border-color: rgba(77,159,255,.55);
+    }
+    .floor[data-state="fire"] { color: var(--danger); }
+    .floor[data-state="fire"] .slabline {
+      background: rgba(255,68,56,.55); border-color: var(--danger);
+      animation: floorPulse 1.2s ease-in-out infinite;
+    }
+    @keyframes floorPulse { 50% { opacity: .35; } }
+    /* 지금 보고 있는 층 — 테두리로 짚는다. 색은 이미 상태가 쓰고 있다. */
+    .floor.on { background: rgba(255,255,255,.07); color: var(--fg); }
+    .floor.on .slabline { outline: 1px solid var(--fg); outline-offset: 1px; }
+    .floor .rooftop { font-size: 10px; color: var(--faint); }
+
     /* 떠 있는 것들의 공통 생김새 */
     .float {
       position: absolute; z-index: 3;
@@ -946,6 +1057,21 @@
       <span hidden id="stat-people">0</span>
       <span hidden id="stat-hazards">0</span>
       <span hidden id="stat-sos">0</span>
+
+      <!-- 건물 전체. **한 층짜리 시스템이 아니라는 것**을 화면이 말해야 한다.
+           불은 한 층에서만 나지 않고, 대피는 층을 내려가는 일이다. -->
+      <div class="tower" id="tower" hidden>
+        <div class="tower-head">
+          <b id="tower-name">건물</b>
+          <span id="tower-note"></span>
+        </div>
+        <!-- 층을 **실제 건물 외곽선으로** 쌓는다. 네모 막대로 쌓으면 어느
+             건물인지 모르고, 그러면 «건물 모형» 이 아니라 «막대 그래프» 다. -->
+        <div class="tower-body">
+          <div class="tower-3d" id="tower-3d"><div class="tower-in" id="tower-in"></div></div>
+          <div class="tower-stack" id="tower-stack"></div>
+        </div>
+      </div>
 
       <div class="legend">
         <span><i class="route"></i>대피 경로</span>

@@ -146,6 +146,7 @@ async function main() {
     set('ctx-floor', floor);
     set('stat-floor', floor);
     loadWalls(plan.id);
+    loadBuilding();
     draw();
   });
 
@@ -155,6 +156,7 @@ async function main() {
     draw();
     // 불의 크기는 서버가 아니라 흐른 시간이 정한다 — 초시계를 켜 둔다.
     tickSpread();
+    drawTower();
     renderSummary();
   });
 
@@ -2177,3 +2179,132 @@ function showError(err) {
 }
 
 main();
+
+/**
+ * 건물 층 스택 — **한 층짜리 시스템이 아니라는 것을 말한다.**
+ *
+ * 관제가 6층 하나만 보여 주면 보는 사람에게 이것은 한 층짜리 시스템이다.
+ * 실제 건물은 지상 7층에 옥상까지 있고, 불은 한 층에서만 나지 않는다.
+ * 그리고 **대피는 층을 내려가는 일**이라(`shared/stair-descent.js`) 층이
+ * 안 보이면 대피의 절반이 안 보인다.
+ *
+ * ## 없는 층을 «정상» 으로 칠하지 않는다
+ *
+ * 일곱 층을 다 그리고 전부 초록으로 두는 것이 제일 쉽고 제일 나쁘다.
+ * 도면을 안 올린 층은 아무것도 안 보고 있는 것인데, 화면은 보고 있다고
+ * 말하게 된다. 상태를 셋으로 갈라 **색과 글씨로 같이** 말한다 — 색만으로
+ * 말하면 색을 못 가리는 사람에게 아무 정보도 안 간다.
+ *
+ * 이 그림 자체가 «도면을 올리면 그 층이 켜진다» 를 말해 준다.
+ */
+let building = null;
+
+async function loadBuilding() {
+  try {
+    building = await (await fetch('/api/building')).json();
+  } catch (_) { building = null; }
+  drawTower();
+}
+
+const FLOOR_STATE = {
+  watched: { label: '감시 중', hint: '도면과 감지기가 있습니다' },
+  'plan-only': { label: '도면만', hint: '도면은 있고 감지기가 없습니다 — 경로는 그리되 감지는 못 합니다' },
+  none: { label: '도면 없음', hint: '이 층은 아직 아무것도 안 보고 있습니다' },
+  fire: { label: '화재', hint: '이 층에서 화재가 감지됐습니다' },
+};
+
+function drawTower() {
+  const box = document.getElementById('tower');
+  const stack = document.getElementById('tower-stack');
+  if (!box || !stack) return;
+  if (!building?.floors?.length) { box.hidden = true; return; }
+  box.hidden = false;
+
+  // 지금 층에 불이 났나 — 층 상태에 얹는다. 6층이 타는데 스택이 초록이면
+  // 그 위젯을 볼 이유가 없다.
+  const burning = Object.values(hazards || {}).some(h => h?.type && h.type !== 'clear');
+  const watched = building.floors.filter(f => f.state === 'watched').length;
+  const withPlan = building.floors.filter(f => f.planId).length;
+
+  document.getElementById('tower-name').textContent = building.name;
+  document.getElementById('tower-note').textContent =
+    `지상 ${building.floors.length}층${building.rooftop ? ' · 옥상' : ''}`
+    + ` · 도면 ${withPlan}개 층`;
+
+  const rows = building.rooftop
+    ? [`<div class="floor" data-state="none">
+         <span class="n rooftop">옥상</span>
+         <span class="st rooftop">도면 없음</span></div>`]
+    : [];
+
+  for (const f of building.floors) {
+    const state = f.active && burning ? 'fire' : f.state;
+    const s = FLOOR_STATE[state];
+    const can = f.planId && !f.active ? '1' : '0';
+    rows.push(`<button class="floor ${f.active ? 'on' : ''}" data-state="${state}"
+      data-can="${can}" data-plan="${f.planId || ''}" ${can === '1' ? '' : 'disabled'}
+      title="${f.label || `${f.floor}층`} · ${s.label} — ${s.hint}${f.name ? `\n${f.name}` : ''}"
+      aria-label="${f.label || `${f.floor}층`} ${s.label}${can === '1' ? ', 누르면 이 층을 봅니다' : ''}">
+      <span class="n">${f.label || `${f.floor}층`}</span>
+      <span class="st">${s.label}</span>
+    </button>`);
+  }
+  stack.innerHTML = rows.join('');
+
+  // ── 3D 모형. 목록과 **같은 데이터, 같은 색**을 쓴다.
+  //
+  // 둘을 따로 계산하면 언젠가 서로 다른 말을 하고, 그때 어느 쪽을 믿을지
+  // 사람이 정해야 한다. 목록은 «읽는» 것이고 모형은 «가리키는» 것이라
+  // 역할만 다르다.
+  const model = document.getElementById('tower-in');
+  if (model) {
+    // 층 간격. 아래가 1층이므로 층수가 클수록 위로 올린다.
+    // 16px 아래로는 일곱 장이 붙어 한 덩어리로 보인다.
+    const GAP = 16;
+    const lv = [];
+    for (const f of building.floors) {
+      const state = f.active && burning ? 'fire' : f.state;
+      const can = f.planId && !f.active ? '1' : '0';
+      // **`title` 을 안 붙인다.** 브라우저 기본 툴팁이 모형 위에 떠서 다른
+      // 층을 가린다 — 모형은 «어느 층인지 가리키는» 물건인데 그 위에 글상자가
+      // 뜨면 정작 가리키는 것을 못 본다. 층 이름과 상태는 바로 옆 목록이
+      // 이미 적고 있고, 스크린리더에는 `aria-label` 로 간다.
+      lv.push(`<div class="lv ${f.active ? 'on' : ''}" data-state="${state}"
+        data-can="${can}" data-plan="${f.planId || ''}"
+        style="--z:${(f.floor - 1) * GAP}px"
+        aria-label="${f.label || `${f.floor}층`} ${FLOOR_STATE[state].label}"></div>`);
+    }
+    model.innerHTML = lv.join('');
+    model.querySelectorAll('[data-can="1"]').forEach(el => {
+      el.addEventListener('click', () => switchFloor(el.dataset.plan));
+    });
+  }
+
+  stack.querySelectorAll('[data-can="1"]').forEach(el => {
+    el.addEventListener('click', () => switchFloor(el.dataset.plan));
+  });
+}
+
+/**
+ * 층을 바꾼다.
+ *
+ * 도면을 갈아 끼우는 일이라 **벽·격자·답사까지 다시 받아야** 한다. 도면만
+ * 바꾸고 벽을 그대로 두면 6층 벽 위에 3층 방이 그려진다.
+ */
+async function switchFloor(planId) {
+  if (!planId) return;
+  const box = document.getElementById('tower');
+  box?.setAttribute('aria-busy', 'true');
+  try {
+    await api.activatePlan(planId);
+    await api.loadFloorPlan();
+    await loadWalls(planId);
+    await loadBuilding();
+    await refreshSurvey();
+    draw();
+  } catch (err) {
+    showError(err);
+  } finally {
+    box?.removeAttribute('aria-busy');
+  }
+}
