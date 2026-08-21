@@ -17,6 +17,7 @@ import { WalkGrid, findPath } from '../shared/walk-grid.js';
 import { TEMP } from '../shared/hazard-rules.js';
 import { PHOTO_SCENARIO, isPhotoScenario } from '../shared/photo-scenario.js';
 import { SPREAD, spreadLabel, spreadProgress, spreadRadius } from '../shared/hazard-spread.js';
+import { escapeHtml } from './escape.js';
 
 const $ = id => document.getElementById(id);
 
@@ -185,12 +186,14 @@ async function main() {
     window.__sosCount = list.length;
     renderList($('sos-list'), list, s => {
       // 구조대가 보호자에게 바로 연락할 수 있도록 등록된 연락처를 함께 띄운다
+      // 이름·연락처는 밖에서 들어온 값이다. tel: 링크는 속성 안이라 따옴표 하나로
+      // 링크 자체가 바뀔 수 있어 특히 위험하다.
       const guardian = s.guardianName
-        ? `<div class="guardian-line">👨‍👩‍👧 보호자 ${s.guardianName}${s.guardianContact ? ` · <a href="tel:${s.guardianContact}">${s.guardianContact}</a>` : ''}</div>`
+        ? `<div class="guardian-line">👨‍👩‍👧 보호자 ${escapeHtml(s.guardianName)}${s.guardianContact ? ` · <a href="tel:${encodeURIComponent(s.guardianContact)}">${escapeHtml(s.guardianContact)}</a>` : ''}</div>`
         : '';
-      return `<span class="sos-item">🆘 ${s.nodeName ?? s.nodeId}</span> — ${s.reason}
+      return `<span class="sos-item">🆘 ${escapeHtml(s.nodeName ?? s.nodeId)}</span> — ${escapeHtml(s.reason)}
         ${guardian}
-        <div class="time">${s.userId} · 확신도 ${Math.round((s.confidence ?? 0) * 100)}% · ${time(s.ts)}</div>`;
+        <div class="time">${escapeHtml(s.userId)} · 확신도 ${Math.round((s.confidence ?? 0) * 100)}% · ${time(s.ts)}</div>`;
     });
   });
 
@@ -214,8 +217,8 @@ async function main() {
     renderList($('metric-list'), list, m => {
       const kind = m.kind === 'reroute' ? '재탐색' : '최초 계산';
       const ok = m.ms <= 2000 ? '✅' : '⚠️';
-      return `${kind}: <strong>${m.ms} ms</strong> ${ok}
-        <div class="time">${m.from ?? ''} 기준 · ${m.userId ?? ''} · ${time(m.ts)}</div>`;
+      return `${kind}: <strong>${Number(m.ms)} ms</strong> ${ok}
+        <div class="time">${escapeHtml(m.from ?? '')} 기준 · ${escapeHtml(m.userId ?? '')} · ${time(m.ts)}</div>`;
     });
   });
 
@@ -887,13 +890,15 @@ function renderPeople() {
     ul.innerHTML = `<li class="empty">${query ? '검색 결과 없음' : '아직 없음'}</li>`;
     return;
   }
+  // 지점 이름은 도면 판독이 만든 값이고 userId·phase 는 인증 없는 위치 보고로
+  // 들어온다. 특히 data-user 는 **속성 안**이라 따옴표 하나로 태그가 끊긴다.
   ul.innerHTML = shown.map(p => {
     const ph = PHASE[p.phase] || { label: p.phase, cls: '' };
-    return `<li data-user="${p.userId}" aria-current="${p.userId === selectedUser}">
-      <span class="who">${p.nodeName ?? p.nodeId}</span>
+    return `<li data-user="${escapeHtml(p.userId)}" aria-current="${p.userId === selectedUser}">
+      <span class="who">${escapeHtml(p.nodeName ?? p.nodeId)}</span>
       <span class="sub">${
         isStale(p) ? `소식 없음 ${Math.round(ageOf(p) / 60000)}분`
-        : staleRoutes.has(p.userId) ? '⚠ 도면 불일치' : ph.label}</span>
+        : staleRoutes.has(p.userId) ? '⚠ 도면 불일치' : escapeHtml(ph.label)}</span>
     </li>`;
   }).join('');
   ul.querySelectorAll('[data-user]').forEach(li =>
@@ -1138,7 +1143,8 @@ function renderDetail() {
   const ph = PHASE[p.phase] || { label: p.phase, cls: '' };
   const conf = Math.round((p.confidence ?? 0) * 100);
   const confCls = conf >= 70 ? 'on' : conf >= 45 ? 'warn' : 'bad';
-  const src = SOURCE[p.source] || p.source || '알 수 없음';
+  // 밖에서 들어온 값(위치 보고·도면 판독)이라 화면에 넣기 전에 막아 둔다
+  const src = escapeHtml(SOURCE[p.source] || p.source || '알 수 없음');
   const total = (p.routeNodes || []).length;
   const left = p.stepsLeft ?? 0;
   const done = Number.isFinite(p.progress)
@@ -1148,11 +1154,11 @@ function renderDetail() {
   box.innerHTML = `
     <div class="panel-head">
       <div class="panel-title">
-        <h2>${p.userId}</h2>
+        <h2>${escapeHtml(p.userId)}</h2>
         <button class="close" id="detail-close" aria-label="닫기">✕</button>
       </div>
       <div class="panel-pills">
-        <span class="pill ${ph.cls}"><i></i>${ph.label}</span>
+        <span class="pill ${ph.cls}"><i></i>${escapeHtml(ph.label)}</span>
         <span class="pill ${p.source === 'beacon' ? 'accent' : 'warn'}">${src}</span>
         <span class="pill ${confCls}">확신도 ${conf}%</span>
         ${staleRoutes.has(p.userId)
@@ -1178,9 +1184,9 @@ function renderDetail() {
       <div class="sub-card">
         <header>현재 위치</header>
         <div class="kv">
-          <div><span class="k">지점</span><span class="v">${p.nodeName ?? p.nodeId ?? '—'}</span></div>
-          <div><span class="k">지점 id</span><span class="v">${p.nodeId ?? '—'}</span></div>
-          <div><span class="k">통로</span><span class="v">${p.edgeId ?? '—'}${
+          <div><span class="k">지점</span><span class="v">${escapeHtml(p.nodeName ?? p.nodeId ?? '—')}</span></div>
+          <div><span class="k">지점 id</span><span class="v">${escapeHtml(p.nodeId ?? '—')}</span></div>
+          <div><span class="k">통로</span><span class="v">${escapeHtml(p.edgeId ?? '—')}${
             Number.isFinite(p.progress) ? ` · ${Math.round(p.progress * 100)}%` : ''}</span></div>
           <div><span class="k">좌표</span><span class="v">${
             Number.isFinite(p.x) ? `${p.x.toFixed(0)}, ${p.y.toFixed(0)}` : '—'}</span></div>
@@ -1191,8 +1197,8 @@ function renderDetail() {
       <div class="route-card">
         <span class="lbl">대피 경로</span>
         <div class="route-ends" style="margin-top:7px">
-          <b>${p.nodeName ?? p.nodeId ?? '현재'}</b>
-          <b>${p.exitName ?? '출구'}</b>
+          <b>${escapeHtml(p.nodeName ?? p.nodeId ?? '현재')}</b>
+          <b>${escapeHtml(p.exitName ?? '출구')}</b>
         </div>
         <div class="route-bar">
           <i style="width:${(done * 100).toFixed(0)}%"></i>
@@ -1699,7 +1705,7 @@ function drawSigns() {
     // 축소하는 것보다 3D 기울기에서도 문·사람 윤곽이 또렷하다.
     return `<b class="${target ? 'target' : ''}"
       style="--x:${n.x}px;--y:${n.y}px;${target ? `--size:${sh * 1.55}px` : ''}"
-      title="${n.name}">
+      title="${escapeHtml(n.name)}">
       <svg viewBox="0 0 64 64" aria-hidden="true">
         <rect width="64" height="64" rx="2" fill="#00b879"/>
         <path d="M14 8h35v36h-7V15H21v13h-7V8zm0 26h7v13l9 9H20l-6-7V34zm28 7h7l4 10H40z"
@@ -2176,14 +2182,14 @@ function renderSensors(list) {
   ul.innerHTML = [...list]
     .sort((a, b) => b.celsius - a.celsius)
     .map(s => {
-      const where = s.edgeId ? `통로 ${s.edgeId}` : `지점 ${s.nodeId}`;
+      const where = s.edgeId ? `통로 ${escapeHtml(s.edgeId)}` : `지점 ${escapeHtml(s.nodeId)}`;
       const state = s.stale ? '⚠️ 판독 끊김'
         : s.celsius >= TEMP.BLOCK ? '🚫 통행 불가'
         : s.celsius >= TEMP.WARN ? '⚠️ 우회 권고' : '정상';
       return `<li>
         <strong style="color:${temperatureColor(s.celsius)}">${Math.round(s.celsius)}°C</strong>
         · ${where} — ${state}
-        <div class="time">${s.sensorId} · ${time(s.ts)}</div>
+        <div class="time">${escapeHtml(s.sensorId)} · ${time(s.ts)}</div>
       </li>`;
     }).join('');
 }
@@ -2266,11 +2272,14 @@ function drawTower() {
     const state = f.active && burning ? 'fire' : f.state;
     const s = FLOOR_STATE[state];
     const can = f.planId && !f.active ? '1' : '0';
+    // 도면 이름(label·name)과 planId 는 편집기·판독이 만든 값이다.
+    // 여기서는 전부 **속성 안**이라 따옴표 하나로 태그가 끊긴다.
+    const lbl = escapeHtml(f.label || `${f.floor}층`);
     rows.push(`<button class="floor ${f.active ? 'on' : ''}" data-state="${state}"
-      data-can="${can}" data-plan="${f.planId || ''}" ${can === '1' ? '' : 'disabled'}
-      title="${f.label || `${f.floor}층`} · ${s.label} — ${s.hint}${f.name ? `\n${f.name}` : ''}"
-      aria-label="${f.label || `${f.floor}층`} ${s.label}${can === '1' ? ', 누르면 이 층을 봅니다' : ''}">
-      <span class="n">${f.label || `${f.floor}층`}</span>
+      data-can="${can}" data-plan="${escapeHtml(f.planId || '')}" ${can === '1' ? '' : 'disabled'}
+      title="${lbl} · ${s.label} — ${s.hint}${f.name ? `\n${escapeHtml(f.name)}` : ''}"
+      aria-label="${lbl} ${s.label}${can === '1' ? ', 누르면 이 층을 봅니다' : ''}">
+      <span class="n">${lbl}</span>
       <span class="st">${s.label}</span>
     </button>`);
   }
@@ -2295,9 +2304,9 @@ function drawTower() {
       // 뜨면 정작 가리키는 것을 못 본다. 층 이름과 상태는 바로 옆 목록이
       // 이미 적고 있고, 스크린리더에는 `aria-label` 로 간다.
       lv.push(`<div class="lv ${f.active ? 'on' : ''}" data-state="${state}"
-        data-can="${can}" data-plan="${f.planId || ''}"
+        data-can="${can}" data-plan="${escapeHtml(f.planId || '')}"
         style="--z:${(f.floor - 1) * GAP}px"
-        aria-label="${f.label || `${f.floor}층`} ${FLOOR_STATE[state].label}"></div>`);
+        aria-label="${escapeHtml(f.label || `${f.floor}층`)} ${FLOOR_STATE[state].label}"></div>`);
     }
     model.innerHTML = lv.join('');
     model.querySelectorAll('[data-can="1"]').forEach(el => {
