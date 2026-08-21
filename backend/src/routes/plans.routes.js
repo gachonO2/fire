@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { Router } from 'express';
+import { buildingFloors } from '../building.js';
 import { validatePlan, FloorPlan, findUnreachableNodes } from '../../../shared/floor-plan.js';
 import { getRepo } from '../repositories/index.js';
 import { requireAdmin } from '../middleware/auth.js';
@@ -261,6 +262,24 @@ async function nextSuffix(repo, base) {
   const used = list.filter(p => String(p.id).startsWith(`draft-${base}-`)).length;
   return used + 1;
 }
+
+/**
+ * 건물 전체 — **층마다 무엇이 있고 무엇이 없는가.**
+ *
+ * 관제가 한 층만 보여 주면 «이 시스템은 한 층짜리인가» 가 된다. 실제
+ * 건물은 7층에 옥상까지 있고, 불은 한 층에서만 나지 않는다.
+ *
+ * 그런데 **없는 것을 있다고 말하면 안 된다.** 도면을 안 올린 층을 «정상»
+ * 으로 칠하면, 관제가 그 층을 보고 있다고 착각한다. 실제로는 아무것도
+ * 안 보고 있는데. 그래서 층마다 상태를 셋으로 가른다.
+ *
+ *   감시 중     도면과 감지기가 있다 — 화면이 그 층을 실제로 본다
+ *   도면만      도면은 올렸지만 감지기가 없다 — 경로는 그리되 감지는 못 한다
+ *   도면 없음   아무것도 없다. 회색으로 두고 그렇게 적는다
+ */
+planRoutes.get('/building', async (req, res) => {
+  res.json(await buildingFloors());
+});
 
 /**
  * 도면에서 뽑아낸 **벽**.

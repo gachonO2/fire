@@ -448,6 +448,58 @@
     .map-stack #pick-layer circle { pointer-events: auto; }
     .map-stack #pick-layer circle { cursor: pointer; }
 
+    /* ── 건물 층 스택 ────────────────────────────────────
+       **없는 층을 정상으로 칠하지 않는다.** 도면을 안 올린 층을 초록으로
+       두면 관제가 그 층을 보고 있다고 착각한다 — 실제로는 아무것도 안
+       보고 있는데. 상태를 셋으로 갈라 색과 글씨로 같이 말한다. */
+    .tower {
+      position: absolute; left: 14px; bottom: 14px; z-index: 6;
+      background: rgba(16,20,27,.82); backdrop-filter: blur(8px);
+      border: 1px solid var(--line); border-radius: 12px;
+      padding: 10px 12px 12px; width: 188px;
+    }
+    .tower-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; }
+    .tower-head b { font-size: 12px; font-weight: 700; }
+    .tower-head span { font-size: 10.5px; color: var(--muted); }
+    /* 층을 위에서 아래로 쌓는다. 살짝 어긋나게 놓아 «겹쳐 쌓인 판» 으로
+       읽히게 하되, 기울이지는 않는다 — 작은 위젯에서 원근을 주면 아래층
+       글씨가 찌그러져 못 읽는다. */
+    .tower-stack { display: flex; flex-direction: column; gap: 2px; }
+    .floor {
+      display: grid; grid-template-columns: 26px 1fr auto; align-items: center;
+      gap: 7px; padding: 3px 5px; border-radius: 5px;
+      background: none; border: 0; width: 100%; text-align: left;
+      color: var(--muted); font: inherit; font-size: 11px; cursor: default;
+    }
+    .floor .n { font-weight: 700; font-variant-numeric: tabular-nums; }
+    /* 층 슬래브 — 실제 도면 외곽선을 쓰지 않고 단순한 판으로 둔다.
+       12px 높이에서는 어떤 외곽선도 얼룩이 된다. */
+    .floor .slabline {
+      height: 9px; border-radius: 2px;
+      background: var(--line-2); border: 1px solid var(--line);
+      transform: skewX(-24deg);
+    }
+    .floor .st { font-size: 10px; }
+    .floor[data-can="1"] { cursor: pointer; }
+    .floor[data-can="1"]:hover { background: rgba(255,255,255,.05); }
+    .floor[data-state="watched"] { color: var(--fg); }
+    .floor[data-state="watched"] .slabline {
+      background: rgba(47,214,166,.5); border-color: var(--ok);
+    }
+    .floor[data-state="plan-only"] .slabline {
+      background: rgba(77,159,255,.28); border-color: rgba(77,159,255,.55);
+    }
+    .floor[data-state="fire"] { color: var(--danger); }
+    .floor[data-state="fire"] .slabline {
+      background: rgba(255,68,56,.55); border-color: var(--danger);
+      animation: floorPulse 1.2s ease-in-out infinite;
+    }
+    @keyframes floorPulse { 50% { opacity: .35; } }
+    /* 지금 보고 있는 층 — 테두리로 짚는다. 색은 이미 상태가 쓰고 있다. */
+    .floor.on { background: rgba(255,255,255,.07); color: var(--fg); }
+    .floor.on .slabline { outline: 1px solid var(--fg); outline-offset: 1px; }
+    .floor .rooftop { font-size: 10px; color: var(--faint); }
+
     /* 떠 있는 것들의 공통 생김새 */
     .float {
       position: absolute; z-index: 3;
@@ -946,6 +998,16 @@
       <span hidden id="stat-people">0</span>
       <span hidden id="stat-hazards">0</span>
       <span hidden id="stat-sos">0</span>
+
+      <!-- 건물 전체. **한 층짜리 시스템이 아니라는 것**을 화면이 말해야 한다.
+           불은 한 층에서만 나지 않고, 대피는 층을 내려가는 일이다. -->
+      <div class="tower" id="tower" hidden>
+        <div class="tower-head">
+          <b id="tower-name">건물</b>
+          <span id="tower-note"></span>
+        </div>
+        <div class="tower-stack" id="tower-stack"></div>
+      </div>
 
       <div class="legend">
         <span><i class="route"></i>대피 경로</span>
