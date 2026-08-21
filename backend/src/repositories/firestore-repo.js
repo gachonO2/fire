@@ -253,6 +253,15 @@ export class FirestoreRepo {
     return snap.empty ? null : snap.docs[0].data();
   }
 
+  /** 이미 쓰이고 있지 않은 코드를 뽑는다 — 겹치면 보호자가 남의 대피 상황을 본다. */
+  async _freshCode() {
+    for (let i = 0; i < 20; i++) {
+      const code = generateCode();
+      if (!(await this.getGuardianByCode(code))) return code;
+    }
+    return generateCode(8); // 여기까지 왔으면 자릿수를 늘린다
+  }
+
   /** 같은 사용자가 다시 등록하면 코드는 유지하고 이름·연락처만 갱신한다. */
   async setGuardian(userId, { name, contact }) {
     const existing = await this.getGuardian(userId);
@@ -260,7 +269,7 @@ export class FirestoreRepo {
       userId,
       name,
       contact,
-      code: existing?.code || generateCode(),
+      code: existing?.code || (await this._freshCode()),
       createdAt: existing?.createdAt || Date.now(),
       updatedAt: Date.now(),
     };
