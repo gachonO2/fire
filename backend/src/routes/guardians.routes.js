@@ -1,7 +1,7 @@
-import { Router } from 'express';
+import { asyncRouter } from './async-router.js';
 import { getRepo } from '../repositories/index.js';
 
-export const guardianRoutes = Router();
+export const guardianRoutes = asyncRouter();
 
 /**
  * 보호자 등록 — 사용자가 대피 전에 미리 설정해 둔다.
