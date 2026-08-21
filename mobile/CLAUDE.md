@@ -29,14 +29,28 @@ curl -s "http://localhost:8081/App.js.bundle?platform=ios&dev=true" -o /dev/null
 메뉴도 탭도 없다. **화면 하나가 상황에 따라 바뀐다.**
 
 ```
-평소       CaptureScreen   피난안내도 촬영
-  ↓        ReviewScreen    찍은 사진 확인 (손가락·반사광은 찍은 뒤에만 안다)
-  ↓        SubmitScreen    가로 폭·방위 입력 → 서버로 (AI 판독까지 한 번에)
-화재 감지  AlarmScreen     전체를 덮음 (사이렌·진동·음성·손전등)
-확인 후    (위치 자동 판정) 비콘이 알려준다 — **묻지 않는다**
+앱을 열면  HomeScreen      대피 시작 + 지금 여기 (시각장애인의 첫 화면)
   ↓        GuideScreen     서버 경로를 진동·소리로 (구간마다 끊어서)
   └ 예외    StartScreen     비콘까지 실패했을 때만 물어본다
+
+화재 감지  AlarmScreen     전체를 덮음 (사이렌·진동·음성·손전등)
+확인 후    (위치 자동 판정) 비콘이 알려준다 — **묻지 않는다** → GuideScreen
+
+측량 도구  CaptureScreen   피난안내도 촬영 (홈에서 한 번 눌러 연다)
+  ↓        ReviewScreen    찍은 사진 확인 (손가락·반사광은 찍은 뒤에만 안다)
+  ↓        SubmitScreen    가로 폭·방위 입력 → 서버로 (AI 판독까지 한 번에)
+           FieldScreen     보폭·축척·북쪽 실측
+           LiveScreen      전파만으로 위치가 잡히는지 확인
+           MagScreen / MagSurveyScreen   지자기 재현성·답사
 ```
+
+**첫 화면은 대피다.** 예전에는 `CAPTURE` 가 기본값이라 앱을 열면 카메라가 켜지고
+측량 도구 버튼이 나왔다 — 측량 도구가 본체이고 대피가 손님인 구조였다.
+시각장애인은 라벨을 아무리 붙여도 그 화면에서 막힌다.
+
+홈은 두 가지만 둔다. **대피 시작**(화면 3분의 2, 스크린리더 첫 초점)과
+**지금 여기**(비콘 판정을 `accessibilityLiveRegion` 으로 읽어 준다).
+측량 도구는 아래에 접어 두고 한 번 눌러 연다.
 
 **도면·경로는 이 앱이 만들지 않는다.** `../fire` 백엔드가 짜서 준다.
 다만 **서버에 못 닿으면 멈추지 않는다** — 도면이 없으면 `demoPlan.js`,
@@ -148,6 +162,25 @@ BLE 스캔은 **Expo Go 에서 안 된다**(`react-native-ble-plx` + 개발 빌�
 | `src/alignment.js` | 촬영 정렬 판정(가속도계). 갤러리 사진 거친 필터 |
 | `src/fireServer.js` | 서버 연동 규격 |
 | `src/theme.js` | 색 토큰 |
+| `src/screens/MagScreen.js` | 지자기 재현성 검사 (측량하는 사람용 도구) |
+
+### `fire/shared/` 에서 내려오는 사본 — **여기서 고치지 말 것**
+
+아래는 `../fire/shared/` 가 원본이고 `npm run sync:app`(fire 쪽에서) 으로 복사된다.
+앱에서 고치면 다음 동기화에 덮인다. 원본을 고치고 다시 돌릴 것.
+
+| 파일 | 역할 |
+|---|---|
+| `src/floor-plan.js` | 도면 모델. 판단 계층이 쓰는 기하 계산(`edgeSteps`, `trueBearing`) |
+| `src/fusion.js` | **판단 계층.** 확정·이동·참고를 하나의 위치·확신도로 |
+| `src/beacon-anchor.js` | 비콘 판정 → 판단 계층 |
+| `src/altitude.js` | 기압 → 층 이동(엘리베이터/계단 구분) |
+| `src/altitude-anchor.js` | 층 이동 → 판단 계층 |
+| `src/magnetic.js` | 지자기 지문 대조 + 재현성 판정 |
+| `src/magnetic-anchor.js` | 지자기 → 판단 계층 (감점 + 누적 확정) |
+
+`positioning.js` 와 `pathfinding.js` 는 **이미 손으로 갈라진 상태**라 동기화 대상이
+아니다(메서드 이름부터 다르다: `setPlan` vs `setFloorPlan`). 합치는 일은 따로 해야 한다.
 
 ---
 
@@ -229,6 +262,29 @@ POST /api/sos                  안내를 멈출 때 보호자·관제에 알림
 - 상황 요약: 30초에 한 번
 
 **연속 배경음을 추가하지 말 것.**
+
+### 계약은 시험이 지킨다
+
+라벨은 화면을 고칠 때마다 **조용히 빠진다** — 눈으로 보면 멀쩡하기 때문이다.
+그래서 `../fire/test/a11y-contract.test.mjs` 가 소스를 파싱해 지킨다:
+
+| 검사 | 대상 |
+|---|---|
+| 누를 수 있는 것마다 `accessibilityLabel` + `accessibilityRole` | 시각장애인 대상 화면 전부 |
+| 상태가 바뀌면 알린다 (live region 또는 `say()`) | 같음 |
+| 손가락이 닿는 크기 44pt 이상 | 같음 |
+| 볼 수 없는 것에 요약 라벨 | `PositionMap` |
+| **모든 화면이 대상/도구 목록 중 하나에 선언돼 있다** | `screens/*.js` 전부 |
+
+마지막 항목이 핵심이다 — 새 화면을 만들고 목록에 안 넣으면 시험이 실패한다.
+조용히 빠지는 것이 제일 위험하다.
+
+정규식으로 긁지 않고 `@babel/parser` 로 문법 나무를 만든다.
+`style={({ pressed }) => [...]}` 의 `=>` 안에 있는 `>` 때문에 문자열 검사가
+태그를 잘못 자르고, 실제로 그렇게 만들었다가 멀쩡한 화면이 전부 위반으로 나왔다.
+
+**이 시험이 못 잡는 것**: 초점 순서, 런타임에 빈 라벨. 둘 다 사람이 눈을 감고
+써봐야 나온다. 시험이 잡는 것은 「빠뜨림」이고 사람이 잡는 것은 「이상함」이다.
 
 ### 화면은 두 사용자를 함께 섬긴다
 

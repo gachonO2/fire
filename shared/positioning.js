@@ -36,6 +36,18 @@ export class BeaconLocator {
     this.reset();
   }
 
+  /**
+   * 매핑을 직접 넣는다 — 도면에 적힌 것 대신.
+   *
+   * 도면은 노드마다 `beaconId` 를 **하나**만 들 수 있다. 그런데 현실에서는 한 방에
+   * 프린터·공유기·모니터가 여럿 있고, 그 전부가 쓸 만한 신호원이다. 도면을 거쳐
+   * 넣으면 그중 하나만 남고 나머지는 표본이 있는데도 판정에서 빠진다 —
+   * 그러면 그 비콘이 1등일 때 판정이 통째로 비어 버린다.
+   *
+   * @param {Object<string,string>} map beaconId → nodeId (여러 개가 같은 노드를 가리켜도 된다)
+   */
+  setBeaconMap(map) { this.beaconToNode = { ...map }; }
+
   /** 도면 교체 시(SSE로 새 도면 수신) 매핑·인접표를 다시 만든다 */
   setFloorPlan(floorPlan) {
     this.beaconToNode = floorPlan.beaconMap();

@@ -27,22 +27,30 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { Alert, SafeAreaView, StyleSheet } from 'react-native';
 
+import HomeScreen from './src/screens/HomeScreen';
+import NorthScreen from './src/screens/NorthScreen';
 import CaptureScreen from './src/screens/CaptureScreen';
 import ReviewScreen from './src/screens/ReviewScreen';
 import AlarmScreen from './src/screens/AlarmScreen';
 import StartScreen from './src/screens/StartScreen';
 import SubmitScreen from './src/screens/SubmitScreen';
 import GuideScreen from './src/screens/GuideScreen';
+import MagScreen from './src/screens/MagScreen';
+import MagSurveyScreen from './src/screens/MagSurveyScreen';
+import WalkSurveyScreen from './src/screens/WalkSurveyScreen';
+import LiveScreen from './src/screens/LiveScreen';
+import FieldScreen from './src/screens/FieldScreen';
 import { FireServer, mockFireEvent } from './src/fireServer';
 import { Api } from './src/api';
-import { locate, setLocator } from './src/locator';
-import { createBeaconLocator } from './src/beaconLocator';
+import { locate, locateSource, setLocator } from './src/locator';
+import { createBeaconLocator, setVirtualStandNode } from './src/beaconLocator';
 import { DEMO_PLAN } from './src/demoPlan';
 import { routeToNearestExit } from './src/pathfinding';
 import { resolveServerUrl } from './src/serverUrl';
 import { initAudio } from './src/sound';
 import { initAnnounce, say } from './src/announce';
 import { theme } from './src/theme';
+import { PHOTO_SCENARIO } from './src/photo-scenario';
 
 /**
  * 서버 주소는 **Expo 개발 서버가 떠 있는 곳**에서 알아낸다 (`src/serverUrl.js`).
@@ -63,19 +71,63 @@ const SERVER_URL = resolveServerUrl();
 setLocator(createBeaconLocator());
 
 const PHASE = {
+  // **시각장애인이 앱을 열면 만나는 화면.** 예전 기본값은 CAPTURE 였는데, 그러면
+  // 앱을 켜자마자 카메라와 측량 도구가 나온다 — 측량 도구가 본체이고 대피가
+  // 손님인 구조였다. 라벨을 아무리 붙여도 첫 화면에서 막힌다.
+  HOME: 'home',
   CAPTURE: 'capture', REVIEW: 'review', SUBMIT: 'submit',
   ALARM: 'alarm', START: 'start', GUIDE: 'guide',
+  // 지자기를 측위에 쓸 수 있는지 재보는 도구 화면. 대피 흐름과 무관하다.
+  MAGCHECK: 'magcheck',
+  // 보폭·층고·나침반 안정도를 실측하는 도구 화면.
+  FIELD: 'field',
+  // 맥 스캐너가 잡은 위치를 **대피를 시작하지 않고** 실시간으로 보는 화면.
+  LIVE: 'live',
+  // 도면 위쪽이 실제 몇 도인지 서서 5초에 잡는다. 이 값이 없으면 방향 안내가
+  // 통째로 꺼지므로, 걸어서 재는 현장 측정보다 급할 때 쓴다.
+  NORTH: 'north',
+  // 통로를 걸으며 자기장 무늬를 남기는 화면. 재현성 검사를 통과한 뒤에 쓴다.
+  MAGSURVEY: 'magsurvey',
+  // 한 번 걸어서 BLE 답사를 만드는 화면.
+  //
+  // **이 앱 안에 있어야 한다.** BLE 식별자는 (기기, 출처)마다 다른 값이라,
+  // 크롬으로 답사해 놓고 앱으로 안내받으면 매핑이 하나도 안 맞는다.
+  // 답사한 폰과 안내받는 폰이 같아야 그 값이 이어진다.
+  WALKSURVEY: 'walksurvey',
 };
 
+
+/**
+ * 도면에 **지자기 지문을 얹는다.**
+ *
+ * `MagneticMatcher` 는 통로(엣지)의 `magnetic` 배열을 읽는다. 지문은 도면과
+ * 따로 저장되므로(측량이 도면 등록보다 나중이고, 도면을 다시 판독해도 지문은
+ * 남아야 한다) 도면을 받을 때마다 합쳐 준다.
+ *
+ * 지문을 못 받아도 도면은 그대로 쓴다 — 지자기는 있으면 좋은 보조 단서이고,
+ * 없으면 비콘과 걸음으로 간다. 여기서 막히면 대피 안내가 아예 안 뜬다.
+ */
+async function withMagneticPrints(api, plan) {
+  if (!plan?.edges?.length) return plan;
+  const got = await api?.getMagneticPrints?.().catch(() => null);
+  const prints = got?.prints;
+  if (!prints || !Object.keys(prints).length) return plan;
+  return {
+    ...plan,
+    edges: plan.edges.map(e => (prints[e.id] ? { ...e, magnetic: prints[e.id] } : e)),
+  };
+}
+
 export default function App() {
-  const [phase, setPhase] = useState(PHASE.CAPTURE);
+  const [phase, setPhase] = useState(PHASE.HOME);
   const [fireEvent, setFireEvent] = useState(null);
   const [shots, setShots] = useState([]);
   const [pending, setPending] = useState(null);   // 확인 대기 중인 사진
-  const [plan, setPlan] = useState(null);         // 서버의 활성 도면
+  const [plan, setPlan] = useState(null);         // 서버의 활성 도면 (지자기 지문까지 얹은 것)
   const [route, setRoute] = useState(null);
   const [startNode, setStartNode] = useState(null);
   const [online, setOnline] = useState(false);
+  const [walls, setWalls] = useState(null);   // 도면에서 읽어낸 벽 — 꺾는 방향 고르기
 
   const api = useRef(new Api(SERVER_URL)).current;
   const server = useRef(null);
@@ -89,12 +141,20 @@ export default function App() {
 
     api.onStatus = setOnline;
     // 도면을 미리 받아둔다. 화재가 난 뒤에 받으려 하면 그때 망이 죽어 있을 수 있다.
-    api.getMap().then(m => m && setPlan(m));
+    api.getMap().then(m => m && withMagneticPrints(api, m).then(p => {
+      setPlan(p);
+      // 벽도 미리 받아 둔다. 통로를 직각으로 꺾을 때 **덜 뚫는 쪽**을 고르는 데
+      // 쓰이고, 그리는 쪽과 안내하는 쪽이 같은 꺾임을 써야 둘이 안 갈라진다.
+      // 화재가 난 뒤에 받으려 하면 그때 망이 죽어 있을 수 있다.
+      if (p?.id) api.getPlanWalls(p.id).then(w => w?.walls?.length && setWalls(w.walls));
+    }));
 
     server.current = new FireServer(SERVER_URL);
     server.current.onFire = evt => {
       // 이미 경보·안내 중이면 다시 덮지 않는다 — 반복 알림이 더 혼란스럽다
-      setPhase(p => ([PHASE.CAPTURE, PHASE.REVIEW, PHASE.SUBMIT].includes(p) ? PHASE.ALARM : p));
+      setPhase(p => (
+        [PHASE.HOME, PHASE.CAPTURE, PHASE.REVIEW, PHASE.SUBMIT].includes(p) ? PHASE.ALARM : p
+      ));
       setFireEvent(evt);
     };
     server.current.connect();
@@ -146,7 +206,7 @@ export default function App() {
     let p = plan;
     if (!p) {
       p = await api.getMap();
-      if (p) setPlan(p);
+      if (p) { p = await withMagneticPrints(api, p); setPlan(p); }
     }
     if (!p) {
       // 예전에는 여기서 끝났다 — "도면을 받지 못했습니다"에서 막다른 길이었다.
@@ -158,15 +218,24 @@ export default function App() {
           { force: true });
     }
 
+    // 시뮬레이션 출발점을 **위치 판정보다 먼저** 받아 온다.
+    //
+    // 처음에는 GuideScreen 이 받아왔는데, 위치 판정은 그보다 앞선 여기서 끝난다.
+    // 그래서 설정한 자리가 반영되지 않고 엉뚱한 곳에서 출발했다.
+    // (실물 매핑이 쌓이면 이 값은 안 쓰인다 — 그때는 전파가 위치를 말한다.)
+    const stand = await api.getStandNode?.().catch(() => null);
+    if (stand?.nodeId) setVirtualStandNode(stand.nodeId);
+
     // 위치는 **묻지 않고 알아낸다.** 불난 상황에 시각장애인에게 목록을 훑게 하는 건
     // 말이 안 된다. 비콘이 가장 세게 잡히는 지점이 곧 현재 위치다.
     const nodeId = await locate(api, p);
     if (nodeId) {
       const node = p.nodes.find(n => n.id === nodeId);
       lastStartId.current = nodeId;
-      // 어디에서 출발하는지 먼저 알린다 — 앱이 위치를 잘못 잡았다면 사용자가
-      // 그 자리에서 알아차려야 한다. 잘못된 출발점은 곧 잘못된 경로다.
-      say(`현재 위치, ${node?.name || '알 수 없음'}. 대피 경로를 찾습니다.`, { force: true });
+      // 무엇으로 잡았는지까지 말한다. 시뮬레이션 값을 실측처럼 읽으면 검증이
+      // 통째로 무의미해진다 — 듣는 사람이 그 차이를 알 수 없기 때문이다.
+      const how = { simulated: ' 가상 비콘 추정입니다.', server: ' 관제가 지정한 위치입니다.' }[locateSource()] || '';
+      say(`현재 위치, ${node?.name || '알 수 없음'}.${how} 대피 경로를 찾습니다.`, { force: true });
       return startGuiding(node, p);
     }
 
@@ -181,15 +250,58 @@ export default function App() {
     startGuiding(node, plan);
   }, [plan, startGuiding]);
 
-  const backToCapture = useCallback(() => {
+  /**
+   * 서버에서 도면을 **다시** 받아 온다.
+   *
+   * 도면은 켤 때 한 번만 받는다. 그래서 측량 도구가 축척이나 북쪽을 고쳐
+   * 서버에 저장해도, **폰이 손에 든 도면은 옛날 것 그대로다.** 값을 저장하고
+   * 대피 안내를 눌러도 아무것도 안 바뀌는 이유가 이것이었다 — 저장은 됐는데
+   * 쓰는 쪽이 모르고 있었다.
+   *
+   * 도구를 닫을 때마다 조용히 다시 받는다. GET 하나라 싸고, 안 받으면
+   * «분명히 쟀는데 왜 그대로지» 를 사람이 매번 겪는다.
+   */
+  const refreshPlan = useCallback(async () => {
+    const m = await api.getMap();
+    if (!m) return null;
+    const p = await withMagneticPrints(api, m);
+    setPlan(p);
+    return p;
+  }, []);
+
+  // 안내가 끝나거나 도구를 닫으면 **홈으로** 돌아온다. 예전에는 촬영 화면으로
+  // 돌아갔는데, 대피를 마친 시각장애인 앞에 카메라가 켜지는 셈이었다.
+  const backHome = useCallback(() => {
     setRoute(null);
     setStartNode(null);
-    setPhase(PHASE.CAPTURE);
+    setPhase(PHASE.HOME);
+    refreshPlan().catch(() => {});
+  }, [refreshPlan]);
+
+  /** 홈의 측량 도구 목록에서 고른 화면으로 간다 */
+  const openTool = useCallback(key => {
+    const to = {
+      capture: PHASE.CAPTURE, live: PHASE.LIVE, field: PHASE.FIELD,
+      magcheck: PHASE.MAGCHECK, magsurvey: PHASE.MAGSURVEY, north: PHASE.NORTH,
+      walksurvey: PHASE.WALKSURVEY,
+    }[key];
+    if (to) setPhase(to);
   }, []);
 
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="light" />
+
+      {phase === PHASE.HOME && (
+        <HomeScreen
+          api={api}
+          plan={plan}
+          online={online}
+          onStartEvac={acknowledge}
+          onTool={openTool}
+          onSimulateFire={simulateFire}
+        />
+      )}
 
       {phase === PHASE.CAPTURE && (
         <CaptureScreen
@@ -197,6 +309,11 @@ export default function App() {
           serverOnline={online}
           onCaptured={shot => { setPending(shot); setPhase(PHASE.REVIEW); }}
           onSimulateFire={simulateFire}
+          onMagCheck={() => setPhase(PHASE.MAGCHECK)}
+          onField={() => setPhase(PHASE.FIELD)}
+          onLive={() => setPhase(PHASE.LIVE)}
+          onMagSurvey={() => setPhase(PHASE.MAGSURVEY)}
+          onClose={backHome}
         />
       )}
 
@@ -224,6 +341,30 @@ export default function App() {
         />
       )}
 
+      {phase === PHASE.MAGCHECK && (
+        <MagScreen api={api} onClose={backHome} />
+      )}
+
+      {phase === PHASE.MAGSURVEY && (
+        <MagSurveyScreen api={api} plan={plan} onClose={backHome} />
+      )}
+
+      {phase === PHASE.WALKSURVEY && (
+        <WalkSurveyScreen api={api} plan={plan} onClose={backHome} />
+      )}
+
+      {phase === PHASE.LIVE && (
+        <LiveScreen api={api} plan={plan} onClose={backHome} />
+      )}
+
+      {phase === PHASE.NORTH && (
+        <NorthScreen api={api} plan={plan} onClose={backHome} onSaved={refreshPlan} />
+      )}
+
+      {phase === PHASE.FIELD && (
+        <FieldScreen onClose={backHome} api={api} plan={plan} onSaved={refreshPlan} />
+      )}
+
       {phase === PHASE.ALARM && (
         <AlarmScreen event={fireEvent} onAcknowledge={acknowledge} />
       )}
@@ -233,7 +374,7 @@ export default function App() {
           plan={plan}
           recentId={lastStartId.current}
           onPick={pickStart}
-          onCancel={backToCapture}
+          onCancel={backHome}
         />
       )}
 
@@ -242,8 +383,10 @@ export default function App() {
           api={api}
           plan={plan}
           route={route}
+          walls={walls}
           startNode={startNode}
-          onExit={backToCapture}
+          scenario={fireEvent?.location === PHOTO_SCENARIO.fireLabel ? PHOTO_SCENARIO : null}
+          onExit={backHome}
           onSafeHold={() => {}}
         />
       )}

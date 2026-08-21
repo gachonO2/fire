@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
+import { File } from 'expo-file-system';
 import { Accelerometer } from 'expo-sensors';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -36,10 +37,52 @@ const HOLD_MS = 350;
  * 틀의 크기·비율. 화면에 그리는 값과 잘라내는 값이 **같은 상수**를 봐야 한다.
  * 한쪽만 바꾸면 보이는 틀과 저장되는 영역이 어긋나고, 사용자는 알아챌 수 없다.
  */
+/** 보낼 사진의 최대 가로 픽셀. 판독기가 이 크기로 충분히 읽는다. */
+const MAX_EDGE = 1400;
+/** 서버 한도(900KB)에서 여유를 둔 값 */
+const MAX_UPLOAD = 820_000;
+
+/** 파일 크기(바이트). 못 재면 null — 그때는 화질을 더 깎지 않는다. */
+async function fileSize(uri) {
+  try { return new File(uri).size ?? null; } catch (_) { return null; }
+}
+
+/**
+ * 보낼 수 있는 크기로 줄인다. **촬영과 갤러리가 같은 길을 쓴다.**
+ *
+ * 예전에는 잘라내기만 하고 보냈다. 요즘 폰 사진은 base64 로 1~3MB 라
+ * 서버 한도(900KB)를 넘어 «사진이 너무 큽니다» 로 막혔고, 건물까지 걸어가
+ * 벽 앞에서 찍은 사람이 거기서 멈췄다. 갤러리에서 고른 사진은 자르지도
+ * 않으니 더 컸다.
+ *
+ * 판독기는 1352px 짜리로 출구 5곳·방 25곳을 읽는다. 그보다 크게 보낼 이유가
+ * 없다 — 큰 사진은 판독을 더 잘하게 하는 게 아니라 **못 보내게 한다.**
+ *
+ * @param {string} uri 원본
+ * @param {{originX,originY,width,height}} [rect] 있으면 먼저 잘라낸다
+ */
+async function shrink(uri, rect = null) {
+  const ctx = ImageManipulator.manipulate(uri);
+  if (rect) ctx.crop(rect);
+  const wide = rect ? rect.width : null;
+  if (!wide || wide > MAX_EDGE) ctx.resize({ width: MAX_EDGE });
+  const img = await ctx.renderAsync();
+
+  // 그래도 크면 화질을 낮춘다. 도면은 선화라 화질을 깎아도 선이 남는다 —
+  // 못 보내는 것보다 낫다.
+  let out = await img.saveAsync({ compress: 0.85, format: SaveFormat.JPEG });
+  for (const q of [0.6, 0.4]) {
+    const size = await fileSize(out.uri);
+    if (size === null || size * 1.37 < MAX_UPLOAD) break;   // base64 는 약 1.37배
+    out = await img.saveAsync({ compress: q, format: SaveFormat.JPEG });
+  }
+  return { uri: out.uri, width: out.width, height: out.height };
+}
+
 const FRAME_WIDTH_RATIO = 0.86;
 const FRAME_ASPECT = 4 / 3;
 
-export default function CaptureScreen({ onCaptured, onSimulateFire, shotCount = 0, serverOnline = false }) {
+export default function CaptureScreen({ onCaptured, onSimulateFire, onMagCheck, onField, onLive, onMagSurvey, onClose, shotCount = 0, serverOnline = false }) {
   const [permission, requestPermission] = useCameraPermissions();
   const [aligned, setAligned] = useState(false);
   const [hint, setHint] = useState('도면을 틀 안에 맞춰주세요');
@@ -126,11 +169,15 @@ export default function CaptureScreen({ onCaptured, onSimulateFire, shotCount = 
       );
       if (!rect) return photo;
 
-      const ctx = ImageManipulator.manipulate(photo.uri);
-      ctx.crop(rect);
-      const img = await ctx.renderAsync();
-      const out = await img.saveAsync({ compress: 0.85, format: SaveFormat.JPEG });
-      return { ...photo, uri: out.uri, width: out.width, height: out.height };
+      // **크기를 줄인다.**
+      //
+      // 잘라내기만 하고 보냈더니 요즘 폰 사진은 base64 로 1~3MB 라 서버 한도
+      // (900KB)를 넘어 «사진이 너무 큽니다» 로 막혔다. 건물까지 걸어가 벽 앞에
+      // 서서 찍은 사람이 거기서 멈춘다.
+      //
+      // 판독기는 1352px 짜리로 출구 5곳·방 25곳을 읽는다. 그보다 크게 보낼
+      // 이유가 없다 — 큰 사진은 판독을 더 잘하게 하는 게 아니라 못 보내게 한다.
+      return { ...photo, ...(await shrink(photo.uri, rect)) };
     } catch (_) {
       return photo;
     }
@@ -161,7 +208,11 @@ export default function CaptureScreen({ onCaptured, onSimulateFire, shotCount = 
         { text: '취소', style: 'cancel' },
         {
           text: '대피도가 맞습니다',
-          onPress: () => onCaptured?.({ ...asset, source: 'library', aligned: false }),
+          onPress: async () => {
+            // 갤러리 사진은 자르지도 않으므로 촬영본보다 크다. 같이 줄인다.
+            const small = await shrink(asset.uri).catch(() => null);
+            onCaptured?.({ ...asset, ...(small || {}), source: 'library', aligned: false });
+          },
         },
       ],
     );
@@ -265,11 +316,49 @@ export default function CaptureScreen({ onCaptured, onSimulateFire, shotCount = 
           <Text style={styles.linkText}>앨범에서 불러오기</Text>
         </Pressable>
 
+        {/* 홈에서 들어왔으므로 나갈 길이 있어야 한다. 예전에는 이 화면이 최상위라
+            닫기가 없었는데, 홈이 생긴 뒤로는 여기 갇힌다. */}
+        {onClose && (
+          <Pressable style={styles.backBtn} onPress={onClose}
+                     accessibilityRole="button" accessibilityLabel="홈으로 돌아가기">
+            <Text style={styles.backText}>‹ 홈으로</Text>
+          </Pressable>
+        )}
+
         {/* 온도 센서가 아직 없으므로, 서버 신호를 흉내내 전체 흐름을 시험한다 */}
         <Pressable style={styles.devBtn} onPress={onSimulateFire}
                    accessibilityRole="button"
                    accessibilityLabel="개발용. 화재 신호 모의 발생">
           <Text style={styles.devText}>🔧 화재 신호 모의 발생 (개발용)</Text>
+        </Pressable>
+
+        {/* 맥 스캐너가 잡은 위치를 그대로 본다. 답사가 제대로 됐는지 **그 자리에서**
+            확인하는 화면이라, 대피 안내를 시작하지 않고 위치만 본다. */}
+        <Pressable style={styles.devBtn} onPress={onLive}
+                   accessibilityRole="button"
+                   accessibilityLabel="실시간 위치 보기">
+          <Text style={styles.devText}>📍 실시간 위치 (전파만)</Text>
+        </Pressable>
+
+        {/* 지자기를 측위에 쓸 수 있는지 재보는 도구. 시각장애인용이 아니라 측량하는 사람용이다. */}
+        <Pressable style={styles.devBtn} onPress={onMagCheck}
+                   accessibilityRole="button"
+                   accessibilityLabel="개발용. 지자기 재현성 검사">
+          <Text style={styles.devText}>🧭 지자기 재현성 검사 (개발용)</Text>
+        </Pressable>
+
+        {/* 재현성이 통과한 뒤에 쓰는 화면. 통로를 걸으며 무늬를 남긴다. */}
+        <Pressable style={styles.devBtn} onPress={onMagSurvey}
+                   accessibilityRole="button"
+                   accessibilityLabel="지자기 지문 측량">
+          <Text style={styles.devText}>🧲 지자기 지문 측량</Text>
+        </Pressable>
+
+        {/* 보폭·층고·나침반 안정도 — 코드에 박힌 가정값을 실측으로 바꾸는 도구 */}
+        <Pressable style={styles.devBtn} onPress={onField}
+                   accessibilityRole="button"
+                   accessibilityLabel="개발용. 현장 측정">
+          <Text style={styles.devText}>📐 현장 측정 (개발용)</Text>
         </Pressable>
       </View>
     </View>
@@ -310,6 +399,9 @@ const styles = StyleSheet.create({
   linkBtn: { paddingVertical: 10, paddingHorizontal: 18 },
   linkText: { color: '#fff', fontSize: 16, textDecorationLine: 'underline' },
   devBtn: { paddingVertical: 8, paddingHorizontal: 14, marginTop: 4 },
+  // 나가는 길은 개발용 링크보다 크고 진하게 — 여기 갇히면 앱을 껐다 켜야 한다
+  backBtn: { minHeight: 48, justifyContent: 'center', paddingHorizontal: 14, marginTop: 6 },
+  backText: { color: theme.text, fontSize: 16 },
   devText: { color: 'rgba(255,255,255,0.45)', fontSize: 12 },
   permTitle: { color: theme.text, fontSize: 20, fontWeight: '700' },
   permBody: { color: theme.textDim, fontSize: 15, textAlign: 'center', lineHeight: 22 },

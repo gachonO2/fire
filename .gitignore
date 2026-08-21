@@ -26,3 +26,14 @@ evacuation_mvp_full_with_models.zip
 
 # 확인용으로 꺼낸 촬영 사진 (원본은 backend/data/plans.json 안에 있다)
 촬영도면/
+
+.gstack/
+
+# BLE 답사 도구용 파이썬 환경 (scripts/scan-beacons.py)
+.venv/
+beacon-survey.json
+beacon-discovery.json
+backend/.env
+
+__pycache__/
+walk-log.jsonl

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+  <!--
+    SAFEXIT 표식 — 파일로도 하나 둔다.
+
+    관제 화면 안에서는 인라인 SVG 라 판의 색을 따라간다(어두운 판에서는
+    밝은 값). 그런데 브라우저 탭 아이콘이나 발표 자료처럼 **판 밖에서**
+    쓸 때는 따라갈 색이 없으므로, 여기서는 색을 못 박는다.
+
+    바탕을 붉게 깐 것은 탭에서 16px 로 줄었을 때를 위해서다. 투명 바탕에
+    가는 선만 있으면 흰 탭에서는 흰 지팡이가 사라지고 어두운 탭에서는
+    검은 문이 사라진다. 붉은 판 하나를 깔면 어느 쪽에서도 같은 그림이다.
+  -->
+  <rect width="40" height="40" rx="9" fill="#d92b28"/>
+  <g transform="translate(20 20) scale(.78) translate(-20 -20)">
+    <path d="M25.5 7.2A15 15 0 1 0 25.5 32.8" fill="none" stroke="#fff"
+          stroke-width="3.6" stroke-linecap="round"/>
+    <path d="M20 32.8h11.5" fill="none" stroke="#fff"
+          stroke-width="3.6" stroke-linecap="round"/>
+    <path d="M29.4 28.6 34.2 32.8 29.4 37z" fill="#fff"/>
+    <circle cx="15.8" cy="12.6" r="2.5" fill="#fff"/>
+    <path d="M15.8 15.8v6.4M15.8 22.2l-2.4 5M15.8 22.2l2.6 4.6M13.2 17.6l-2 3.4M18.2 17.6l1.8 2.6"
+          fill="none" stroke="#fff" stroke-width="2.3"
+          stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M20 20.2 23.4 26.6" fill="none" stroke="#fff"
+          stroke-width="1.7" stroke-linecap="round"/>
+    <g fill="#fff">
+      <circle cx="25" cy="27.2" r="1"/><circle cx="27.6" cy="26.4" r="1"/>
+      <circle cx="30" cy="25.2" r="1"/>
+    </g>
+    <path d="M30.6 9.6 39 5.6v29.2l-8.4-3.4z" fill="#fff"/>
+    <rect x="32.2" y="19.4" width="1.6" height="3.6" rx=".8" fill="#d92b28"/>
+  </g>
+</svg>

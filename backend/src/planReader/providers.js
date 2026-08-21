@@ -20,6 +20,14 @@
 import { config } from '../config.js';
 
 const ANTHROPIC_VERSION = '2023-06-01';
+
+/**
+ * 게이트웨이 앞의 Cloudflare 는 기본 User-Agent 를 막는다(1010).
+ * 우회가 아니라 정상적인 클라이언트임을 알리는 최소한의 표시다.
+ */
+const BROWSERY_UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
+  + '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const GOOGLE_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 /** 잠깐 붐벼서 나는 오류. 다시 걸면 되므로 실패로 못박지 않는다. */
@@ -53,6 +61,7 @@ async function withRetry(fn) {
 
 /** 지금 쓸 연결부. Google 키가 있으면 그쪽이 우선이다 — 이미지가 확실히 가므로. */
 export function provider() {
+  if (config.openaiApiKey && config.openaiBaseUrl) return openaiCompatible;
   if (config.googleApiKey) return google;
   if (config.anthropicApiKey || config.anthropicAuthToken) return anthropic;
   return null;
@@ -70,7 +79,13 @@ const anthropic = {
   model: () => config.planReaderModel,
 
   headers() {
-    const h = { 'content-type': 'application/json', 'anthropic-version': ANTHROPIC_VERSION };
+    const h = {
+      'content-type': 'application/json',
+      'anthropic-version': ANTHROPIC_VERSION,
+      // 게이트웨이는 대개 Cloudflare 뒤에 있고, 기본 User-Agent 로 부르면
+      // 1010(클라이언트 차단)으로 막힌다. 실제로 monogpt 에서 전부 403 이 났다.
+      'user-agent': BROWSERY_UA,
+    };
     if (config.anthropicAuthToken) h.authorization = `Bearer ${config.anthropicAuthToken}`;
     if (config.anthropicApiKey) h['x-api-key'] = config.anthropicApiKey;
     return h;
@@ -151,6 +166,79 @@ const google = {
     return (j.models || [])
       .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
       .map(m => String(m.name).replace(/^models\//, ''));
+  },
+};
+
+// ---------------------------------------------------------- OpenAI 규격 게이트웨이
+
+/**
+ * OpenAI 규격(`/v1/chat/completions`)만 여는 게이트웨이.
+ *
+ * MonoRouter 가 그렇다 — Claude·Gemini 모델을 **OpenAI 형식으로만** 중계한다.
+ * Anthropic 형식을 보내면 `unknown_endpoint` 404 가 난다.
+ *
+ * ## 브라우저 흉내가 필요하다
+ *
+ * 이런 게이트웨이는 Cloudflare 뒤에 있는 경우가 많고, 기본 User-Agent 로 부르면
+ * **1010(클라이언트 차단)** 으로 막힌다. 실제로 그래서 처음에 전부 403 이 났다.
+ * 우회가 아니라, 정상적인 클라이언트임을 알리는 최소한의 표시다.
+ */
+const openaiCompatible = {
+  name: 'OpenAI 규격 게이트웨이',
+  model: () => config.openaiModel,
+
+  headers() {
+    return {
+      'content-type': 'application/json',
+      accept: 'application/json',
+      authorization: `Bearer ${config.openaiApiKey}`,
+      'user-agent': BROWSERY_UA,
+    };
+  },
+
+  async send(parts, { tool = null, maxTokens = 8000 } = {}) {
+    // OpenAI 는 이미지를 data URI 로 받는다 (Anthropic 의 base64 블록과 다르다)
+    const content = parts.map(p => (p.kind === 'image'
+      ? { type: 'image_url', image_url: { url: `data:${p.mediaType};base64,${p.base64}` } }
+      : { type: 'text', text: p.text }));
+
+    const body = {
+      model: this.model(),
+      max_completion_tokens: maxTokens,
+      messages: [{ role: 'user', content }],
+    };
+    if (tool) {
+      body.tools = [{
+        type: 'function',
+        function: { name: tool.name, description: tool.description, parameters: tool.schema },
+      }];
+      body.tool_choice = { type: 'function', function: { name: tool.name } };
+    }
+
+    const j = await withRetry(async () => {
+      const res = await fetch(`${config.openaiBaseUrl}/v1/chat/completions`, {
+        method: 'POST', headers: this.headers(), body: JSON.stringify(body),
+      });
+      if (!res.ok) throw await httpError(res);
+      return res.json();
+    });
+
+    const call = j.choices?.[0]?.message?.tool_calls?.[0];
+    let toolInput = null;
+    if (call?.function?.arguments) {
+      // 인자는 **문자열로** 온다. 모델이 깨진 JSON 을 낼 수 있으니 던지지 않고 null 로.
+      try { toolInput = JSON.parse(call.function.arguments); } catch (_) { toolInput = null; }
+    }
+    return { toolInput, inputTokens: j.usage?.prompt_tokens ?? null };
+  },
+
+  async listModels() {
+    try {
+      const res = await fetch(`${config.openaiBaseUrl}/v1/models`, { headers: this.headers() });
+      if (!res.ok) return [];
+      const j = await res.json();
+      return (j.data || []).map(m => m.id);
+    } catch (_) { return []; }
   },
 };
 

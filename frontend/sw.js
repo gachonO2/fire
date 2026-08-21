@@ -5,7 +5,7 @@
  * /api/* 는 절대 캐시하지 않는다 — 오래된 위험 정보로 안내하면 안 되기 때문.
  * 서버에 닿지 못하면 api.js가 오프라인 폴백으로 전환하고 사용자에게 그 사실을 알린다.
  */
-const CACHE = 'fireguide-v6';
+const CACHE = 'fireguide-v7';
 const SHELL = [
   './',
   './index.html',
@@ -29,6 +29,7 @@ const SHELL = [
   './shared/floor-plan.js',
   './shared/hazard-rules.js',
   './shared/pathfinding.js',
+  './shared/photo-scenario.js',
   './shared/positioning.js',
   './manifest.json',
   './icon.svg',

@@ -15,6 +15,7 @@ import { CompassGuide } from './compass-guide.js';
 import { BeaconSense } from './beacon.js';
 import { Api } from './api.js';
 import { renderMap, positionOnRoute } from './minimap.js';
+import { PHOTO_SCENARIO, isPhotoScenario } from '../shared/photo-scenario.js';
 
 const $ = id => document.getElementById(id);
 
@@ -114,6 +115,11 @@ async function main() {
     const sig = h => JSON.stringify(Object.keys(h).sort().map(k => [k, h[k].type]));
     const changed = sig(state.hazards) !== sig(hazards);
     state.hazards = hazards;
+    if (isPhotoScenario(plan().id, hazards)) {
+      // 웹 앱의 가상 비콘도 사진의 FR 앞에서 시작하게 한다.
+      state.standNodeId = PHOTO_SCENARIO.startNodeId;
+      state.beacon?.start();
+    }
     if (state.phase === 'guiding' && changed) onHazardsChanged();
     else drawMap();
   });
@@ -567,13 +573,20 @@ function myPosition() {
 }
 
 function drawMap() {
+  const photo = isPhotoScenario(plan().id, state.hazards);
   renderMap($('minimap'), {
     floorPlan: plan(),
     backgroundImage: state.api.backgroundImage,
     hazards: state.hazards,
     sensors: state.sensors,
-    route: state.route,
-    userPos: myPosition(),
+    // 사진 시나리오는 관제와 같은 단일 선을 쓴다. 자동 계산 경로까지 넘기면
+    // 같은 지도에 파란 길이 두 개가 겹친다.
+    route: photo ? null : state.route,
+    userPos: photo ? null : myPosition(),
+    scenario: photo ? PHOTO_SCENARIO : null,
+    showGraph: false,
+    nodeLabels: 'exits',
+    imageOpacity: 1,
   });
 }
 
