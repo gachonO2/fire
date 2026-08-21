@@ -255,6 +255,22 @@ export class MemoryRepo {
     return [...this.guardians.values()].find(g => g.code === wanted) || null;
   }
 
+  /**
+   * 코드가 이미 쓰이고 있지 않은 것으로 뽑는다.
+   *
+   * 겹칠 확률은 낮지만(31^6), 겹치면 보호자가 **남의 대피 상황을 본다** —
+   * getGuardianByCode 는 먼저 찾은 하나를 돌려주기 때문이다. 확률이 낮다는 것과
+   * 일어나도 괜찮다는 것은 다르다.
+   */
+  _freshCode() {
+    const taken = new Set([...this.guardians.values()].map(g => g.code));
+    for (let i = 0; i < 20; i++) {
+      const code = generateCode();
+      if (!taken.has(code)) return code;
+    }
+    return generateCode(8); // 여기까지 왔으면 자릿수를 늘린다
+  }
+
   /** 같은 사용자가 다시 등록하면 코드는 유지하고 이름·연락처만 갱신한다. */
   async setGuardian(userId, { name, contact }) {
     const existing = this.guardians.get(userId);
@@ -262,7 +278,7 @@ export class MemoryRepo {
       userId,
       name,
       contact,
-      code: existing?.code || generateCode(),
+      code: existing?.code || this._freshCode(),
       createdAt: existing?.createdAt || Date.now(),
       updatedAt: Date.now(),
     };
