@@ -72,58 +72,110 @@ const node = (id, type, name, x, y, extra = {}) =>
  * @param {number} floor
  * @param {{bridge?: boolean, half?: boolean}} opts
  */
+/**
+ * 기준층 하나.
+ *
+ * ## 도면을 다시 읽고 고친 것
+ *
+ * 처음에는 지점만 찍고 방을 «지점을 감싸는 사각형» 으로 그렸다. 그랬더니
+ * 방들이 서로 떨어져 **허공에 뜬 상자 스무 개**가 됐다. 실제 도면은
+ * 그렇지 않다 — 방은 서로 벽을 맞대고 붙어 있고, 바깥쪽은 건물 외벽에
+ * 닿아 있다.
+ *
+ *     ┌────────────────────────────────────┐
+ *     │ 북쪽 강의실 (대각선 외벽에 붙어 연속) │
+ *     │   북쪽 복도                          │
+ *     │        ░ 가운데 보이드 ░      ┌──────┤
+ *     │   남쪽 복도                   │ 동쪽 │
+ *     │ 남쪽 강의실 (남쪽 외벽에 붙어) │ 블록 │
+ *     └───────────────────────────────┴──────┘
+ *
+ * 동쪽 블록은 계단·엘리베이터·화장실이 모인 곳이다. 도면에서 제일 눈에
+ * 띄는 덩어리인데 처음엔 통째로 빠져 있었다.
+ */
 function standardFloor(floor, opts = {}) {
   const nodes = [];
   const edges = [];
   const link = (a, b, extra = {}) =>
     edges.push({ id: `e${edges.length + 1}`, a, b, wall: null, ...extra });
+  /** 방 폴리곤 — 지점과 함께 낸다. 나중에 되짚지 않으려고 여기서 같이 만든다. */
+  const rooms = [];
 
   // 1층은 동쪽 절반만. 서쪽은 지반에 묻혀 있다.
-  const tFrom = opts.half ? 0 : 0;
-  const tTo = opts.half ? 0.42 : 0.86;
-  const SPANS = opts.half ? 5 : 10;
+  const tTo = opts.half ? 0.44 : 0.9;
+  const SPANS = opts.half ? 5 : 11;
+  const xFrom = opts.half ? 690 : 60;
+  const xTo = 1140;                       // 동쪽 블록 앞에서 멈춘다
 
-  // ── 북쪽: 대각선을 따라 복도와 강의실
+  const D_ROOM = 78;                      // 방 깊이
+  const D_CORR = 118;                     // 복도 중심까지
+
+  // ── 북쪽 — 대각선 외벽에 붙은 연속된 강의실
   const nCorr = [];
   for (let i = 0; i <= SPANS; i++) {
-    const t = tFrom + (tTo - tFrom) * (i / SPANS);
-    const [cx, cy] = onDiag(t, 108);
+    const t = (tTo * i) / SPANS;
+    const [cx, cy] = onDiag(t, D_CORR);
     const id = `N${i}`;
     nodes.push(node(id, 'junction', `북쪽 복도 ${i + 1}`, cx, cy));
     nCorr.push(id);
     if (i > 0) link(nCorr[i - 1], id);
+    if (i === SPANS) break;
 
-    if (i < SPANS) {
-      const tm = tFrom + (tTo - tFrom) * ((i + 0.5) / SPANS);
-      const [rx, ry] = onDiag(tm, 46);
-      const rid = `NR${i}`;
-      nodes.push(node(rid, 'room', `${floor}0${i + 1}호 강의실`, rx, ry));
-      link(id, rid);
-    }
+    const t2 = (tTo * (i + 1)) / SPANS;
+    const [rx, ry] = onDiag((t + t2) / 2, D_ROOM / 2 + 6);
+    const rid = `NR${i}`;
+    nodes.push(node(rid, 'room', `${floor}${String(i + 1).padStart(2, '0')}호`, rx, ry));
+    link(id, rid);
+    // 대각선을 따라 이웃과 변을 맞댄 사다리꼴
+    rooms.push([onDiag(t, 6), onDiag(t2, 6),
+      onDiag(t2, D_ROOM + 6), onDiag(t, D_ROOM + 6)]);
   }
 
-  // ── 남쪽: 수평 복도와 강의실
-  const xFrom = opts.half ? 700 : 90;
-  const xTo = 1290;
+  // ── 남쪽 — 남쪽 외벽에 붙은 연속된 강의실
+  const S_WALL = 711;
   const sCorr = [];
   for (let i = 0; i <= SPANS; i++) {
     const cx = Math.round(xFrom + (xTo - xFrom) * (i / SPANS));
     const id = `S${i}`;
-    nodes.push(node(id, 'junction', `남쪽 복도 ${i + 1}`, cx, 612));
+    nodes.push(node(id, 'junction', `남쪽 복도 ${i + 1}`, cx, S_WALL - D_CORR));
     sCorr.push(id);
     if (i > 0) link(sCorr[i - 1], id);
+    if (i === SPANS) break;
 
-    if (i < SPANS) {
-      const rx = Math.round(xFrom + (xTo - xFrom) * ((i + 0.5) / SPANS));
-      const rid = `SR${i}`;
-      nodes.push(node(rid, 'room', `${floor}${String(20 + i).padStart(2, '0')}호 강의실`, rx, 672));
-      link(id, rid);
-    }
+    const x2 = Math.round(xFrom + (xTo - xFrom) * ((i + 1) / SPANS));
+    const rid = `SR${i}`;
+    nodes.push(node(rid, 'room', `${floor}${String(20 + i).padStart(2, '0')}호`,
+      Math.round((cx + x2) / 2), S_WALL - D_ROOM / 2 - 6));
+    link(id, rid);
+    rooms.push([[cx, S_WALL - D_ROOM - 6], [x2, S_WALL - D_ROOM - 6],
+      [x2, S_WALL - 6], [cx, S_WALL - 6]]);
   }
 
-  // ── 양 끝에서 두 복도가 만난다. **가운데는 뚫려 있다.**
-  link(nCorr[0], sCorr[SPANS]);              // 동쪽 끝
-  if (!opts.half) link(nCorr[SPANS], sCorr[0]);   // 서쪽 끝 (반쪽 층에는 없다)
+  // ── 동쪽 블록 — 계단·엘리베이터·화장실. 도면에서 제일 큰 덩어리다.
+  const EX0 = 1160;
+  const EX1 = 1340;
+  const EAST = [
+    ['EAST_STAIR', 'exit', '동쪽 계단', 120, 230],
+    ['ELEV', 'elevator', '엘리베이터', 250, 360],
+    ['EAST_WC', 'room', '화장실', 380, 500],
+    ['EAST_LEC', 'room', '계단식 강의실', 520, 690],
+  ];
+  const eastHall = 'E_HALL';
+  nodes.push(node(eastHall, 'junction', '동쪽 홀', EX0 - 26, 430));
+  link(eastHall, nCorr[0]);
+  link(eastHall, sCorr[SPANS]);
+  for (const [id, type, name, y0, y1] of EAST) {
+    nodes.push(node(id, type, name, Math.round((EX0 + EX1) / 2), Math.round((y0 + y1) / 2)));
+    link(eastHall, id);
+    rooms.push([[EX0, y0], [EX1, y0], [EX1, y1], [EX0, y1]]);
+  }
+
+  // ── 서쪽 끝에서 두 복도가 만난다. **가운데는 뚫려 있다.**
+  if (!opts.half) {
+    nodes.push(node('EXIT_W', 'exit', '서쪽 계단', 96, 470));
+    link('EXIT_W', nCorr[SPANS]);
+    link('EXIT_W', sCorr[0]);
+  }
 
   // ── 5층만 있는 중앙 연결다리.
   //
@@ -131,34 +183,23 @@ function standardFloor(floor, opts = {}) {
   // 자리에서 불이 나도 양 끝까지 돌아가야 한다.
   if (opts.bridge) {
     const mid = Math.round(SPANS / 2);
+    const a = nodes.find(n => n.id === nCorr[mid]);
+    const b = nodes.find(n => n.id === sCorr[mid]);
     nodes.push(node('BRIDGE', 'junction', '중앙 연결다리',
-      Math.round((nodes.find(n => n.id === nCorr[mid]).x
-        + nodes.find(n => n.id === sCorr[mid]).x) / 2),
-      Math.round((nodes.find(n => n.id === nCorr[mid]).y
-        + nodes.find(n => n.id === sCorr[mid]).y) / 2)));
+      Math.round((a.x + b.x) / 2), Math.round((a.y + b.y) / 2)));
     link(nCorr[mid], 'BRIDGE');
     link('BRIDGE', sCorr[mid]);
   }
 
-  // ── 계단·비상구. 동쪽 계단은 모든 층에 있다(엘리베이터와 나란히).
-  nodes.push(node('EXIT_E', 'exit', '동쪽 계단', 1300, 380));
-  link('EXIT_E', nCorr[0]);
-  link('EXIT_E', sCorr[SPANS]);
-
-  nodes.push(node('ELEV', 'elevator', '엘리베이터', 1240, 300));
-  link('ELEV', nCorr[0]);
-
+  // 중앙 계단 — 남쪽 복도 한가운데
   if (!opts.half) {
-    nodes.push(node('EXIT_W', 'exit', '서쪽 계단', 70, 520));
-    link('EXIT_W', nCorr[SPANS]);
-    link('EXIT_W', sCorr[0]);
-
     const mid = Math.round(SPANS / 2);
-    nodes.push(node('EXIT_M', 'exit', '중앙 계단', nodes.find(n => n.id === sCorr[mid]).x, 560));
+    const m = nodes.find(n => n.id === sCorr[mid]);
+    nodes.push(node('EXIT_M', 'exit', '중앙 계단', m.x, m.y - 44));
     link('EXIT_M', sCorr[mid]);
   }
 
-  return { nodes, edges };
+  return { nodes, edges, rooms };
 }
 
 /** 옥탑 — 옥상으로 나가는 층. 방이 거의 없고 계단과 기계실뿐이다. */
@@ -197,50 +238,49 @@ function penthouse() {
  * 도면» 이 아니라 «구조를 옮겨 적은 도면» 이고, 관제에 필요한 것은 어느
  * 방이 어디쯤 있나까지다.
  */
-function shell(nodes, edges, opts = {}) {
+function shell(nodes, edges, roomPolys) {
   const rooms = [];
   const walls = [];
-  const push = (x1, y1, x2, y2) =>
-    walls.push({ x1: Math.round(x1), y1: Math.round(y1), x2: Math.round(x2), y2: Math.round(y2) });
-
-  const byId = new Map(nodes.map(n => [n.id, n]));
-  const rect = (cx, cy, w, h, ang = 0) => {
-    const c = Math.cos(ang), s = Math.sin(ang);
-    return [[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]]
-      .map(([x, y]) => [Math.round(cx + x * c - y * s), Math.round(cy + x * s + y * c)]);
+  const seen = new Set();
+  // **같은 벽을 두 번 긋지 않는다.** 방이 서로 변을 맞대고 있으므로 네 변을
+  // 다 그으면 칸막이가 겹쳐 두 겹이 되고, 세워 놓으면 z-파이팅으로 깜빡인다.
+  const push = (a, b) => {
+    const k = [a, b].map(p => p.map(Math.round).join(',')).sort().join('|');
+    if (seen.has(k)) return;
+    seen.add(k);
+    walls.push({ x1: Math.round(a[0]), y1: Math.round(a[1]),
+      x2: Math.round(b[0]), y2: Math.round(b[1]) });
   };
 
-  // 북쪽 강의실 — 대각선에 붙으므로 같이 기울인다
-  const ang = Math.atan2(dy, dx);
-  for (const n of nodes) {
-    if (n.type !== 'room') continue;
-    const north = n.id.startsWith('NR');
-    const pts = north ? rect(n.x, n.y, 96, 76, ang) : rect(n.x, n.y, 104, 78);
-    const area = 96 * 76;
-    rooms.push({ points: pts, area, cx: n.x, cy: n.y });
-    // 방을 두르는 네 변이 곧 벽이다
-    for (let i = 0; i < 4; i++) {
-      const a = pts[i], b = pts[(i + 1) % 4];
-      push(a[0], a[1], b[0], b[1]);
+  for (const pts of roomPolys) {
+    const p = pts.map(([x, y]) => [Math.round(x), Math.round(y)]);
+    let a2 = 0;
+    for (let i = 0; i < p.length; i++) {
+      const q = p[(i + 1) % p.length];
+      a2 += p[i][0] * q[1] - q[0] * p[i][1];
+      push(p[i], q);
     }
+    rooms.push({
+      points: p, area: Math.abs(a2) / 2,
+      cx: p.reduce((s2, q) => s2 + q[0], 0) / p.length,
+      cy: p.reduce((s2, q) => s2 + q[1], 0) / p.length,
+    });
   }
 
   // 건물 외곽 — 6층과 같은 건물이므로 같은 외곽선을 쓴다
   const FOOT = [[1351, 0], [1243, 0], [1239, 44], [210, 357], [198, 366],
     [43, 414], [0, 414], [0, 717], [1351, 717]];
-  for (let i = 0; i < FOOT.length; i++) {
-    const a = FOOT[i], b = FOOT[(i + 1) % FOOT.length];
-    push(a[0], a[1], b[0], b[1]);
-  }
+  for (let i = 0; i < FOOT.length; i++) push(FOOT[i], FOOT[(i + 1) % FOOT.length]);
 
   // ── 걸을 수 있는 칸.
   //
-  // 통로를 따라 굵은 띠를 칠한다. 방은 «걸을 수 있지만 복도는 아님» 으로
-  // 두어, 경로가 남의 방을 가로지르지 않게 한다(`shared/walk-grid.js`).
+  // 통로를 따라 띠를 칠한다. 방은 «걸을 수 있지만 복도는 아님» 으로 두어,
+  // 경로가 남의 방을 가로지르지 않게 한다(`shared/walk-grid.js`).
   const GW = 220, GH = 117;
   const sx = W / GW, sy = H / GH;
   const cells = new Uint8Array(GW * GH);
   const corr = new Uint8Array(GW * GH);
+  const byId = new Map(nodes.map(n => [n.id, n]));
   const paint = (arr, x, y, r) => {
     const cx = Math.round(x / sx), cy = Math.round(y / sy);
     for (let j = -r; j <= r; j++) {
@@ -254,8 +294,6 @@ function shell(nodes, edges, opts = {}) {
     const a = byId.get(e.a), b = byId.get(e.b);
     if (!a || !b) continue;
     const steps = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 4);
-    // 복도끼리 잇는 통로만 «복도» 로 친다. 방으로 들어가는 목은 걸을 수는
-    // 있되 복도가 아니다 — 그래야 경로가 방을 가로지르지 않는다.
     const isCorr = a.type !== 'room' && b.type !== 'room';
     for (let i = 0; i <= steps; i++) {
       const x = a.x + (b.x - a.x) * (i / steps);
@@ -295,7 +333,7 @@ const PLANS = [
 ];
 
 for (const p of PLANS) {
-  const { nodes, edges } = p.build();
+  const { nodes, edges, rooms: roomPolys = [] } = p.build();
   const plan = {
     id: p.id,
     name: p.name,
@@ -308,7 +346,7 @@ for (const p of PLANS) {
   const r = await post('/plans', plan);
 
   // 벽·방·격자를 파일로 낸다. 관제가 `/api/plans/:id/walls` 로 읽는 그 파일이다.
-  const sh = shell(nodes, edges);
+  const sh = shell(nodes, edges, roomPolys);
   writeFileSync(new URL(`../backend/data/walls-${p.id}.json`, import.meta.url),
     JSON.stringify(sh));
 
