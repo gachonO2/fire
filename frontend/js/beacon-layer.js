@@ -82,8 +82,13 @@ export function drawFoundBeacons(svg, floorPlan, estimates = []) {
 export function beaconPlacements(floorPlan) {
   const real = floorPlan.beaconNodes();
   if (real.length) {
+    // **`SIM-` 은 시뮬레이션이다.** 도면에 등록돼 있어도 실물이 아니므로
+    // `virtual` 로 표시해 옅게·점선으로 그린다. 없는 설비를 있다고 그리는
+    // 것이 관제 화면이 할 수 있는 가장 나쁜 거짓말이라, 그리되 **무엇인지는
+    // 화면이 말해야** 한다.
     return real.map(n => ({
-      nodeId: n.id, name: n.name, x: n.x, y: n.y, beaconId: n.beaconId, virtual: false,
+      nodeId: n.id, name: n.name, x: n.x, y: n.y, beaconId: n.beaconId,
+      virtual: String(n.beaconId).startsWith('SIM'),
     }));
   }
   // 하나도 없으면 앱이 엘리베이터를 뺀 모든 지점에 가상 비콘을 놓는다
@@ -131,15 +136,38 @@ export function drawBeacons(svg, floorPlan, opts = {}) {
   for (const b of places) {
     const color = b.virtual ? BEACON_COLORS.virtual : BEACON_COLORS.real;
     const on = b.nodeId === selectedNodeId;
-    const s = scale * (on ? 1.5 : 1.1);
+    const s = scale * (on ? 2.4 : 1.9);
 
-    // 마름모 — 지점(원)과 헷갈리지 않게 모양을 달리한다
+    // **비콘이라는 것이 보여야 한다.**
+    //
+    // 예전에는 작은 마름모 하나였다. 발표 자료에 넣으려고 화면을 줄이면
+    // 점으로 뭉개져서 «저게 비콘» 인 줄 모른다. 세 겹으로 그린다 —
+    //
+    //   후광     어두운 판에서 자리를 잡아 준다
+    //   마름모   지점(원)과 헷갈리지 않게 모양을 달리한다
+    //   전파선   비콘이 «신호를 낸다» 는 것을 정지 화면에서도 말한다
+    //
+    // 전파선이 핵심이다. 마름모만으로는 «표식» 이고, 호 두 개가 붙으면
+    // «송신기» 로 읽힌다.
+    add(svg, 'circle', {
+      cx: b.x, cy: b.y, r: s * 2.1,
+      fill: color, 'fill-opacity': b.virtual ? 0.1 : 0.16,
+    });
     add(svg, 'polygon', {
       points: `${b.x},${b.y - s} ${b.x + s},${b.y} ${b.x},${b.y + s} ${b.x - s},${b.y}`,
-      fill: color, 'fill-opacity': b.virtual ? 0.55 : 1,
-      stroke: color, 'stroke-width': scale * 0.22,
-      'stroke-dasharray': b.virtual ? `${scale * 0.5} ${scale * 0.35}` : 'none',
+      fill: color, 'fill-opacity': b.virtual ? 0.75 : 1,
+      stroke: '#0b0f14', 'stroke-width': scale * 0.34,
     });
+    // 위로 퍼지는 전파 호 두 개
+    for (const k of [1.55, 2.25]) {
+      add(svg, 'path', {
+        d: `M ${b.x - s * k} ${b.y - s * k * 0.5}`
+          + ` A ${s * k * 1.25} ${s * k * 1.25} 0 0 1 ${b.x + s * k} ${b.y - s * k * 0.5}`,
+        fill: 'none', stroke: color,
+        'stroke-width': scale * 0.3, 'stroke-linecap': 'round',
+        'stroke-opacity': b.virtual ? 0.55 : 0.85,
+      });
+    }
   }
 
   return places;
