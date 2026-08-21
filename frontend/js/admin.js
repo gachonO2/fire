@@ -284,6 +284,9 @@ function draw() {
   if (api.floorPlan && isOn('show-beacons') && hasAnyBeacons()) {
     drawBeacons(document.getElementById('admin-map'), api.floorPlan, {
       showRange: isOn('show-range', false),
+      // 세기는 **받는 사람** 이 있어야 나온다. 파동 애니메이션과 같은 목록을
+      // 넘겨야 커진 기호와 센 파동이 같은 자리에서 만난다.
+      near: livePositions().filter(p => Number.isFinite(p?.x)),
     });
   }
   drawSurvey();
