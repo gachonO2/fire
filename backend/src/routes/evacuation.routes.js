@@ -1,9 +1,9 @@
-import { Router } from 'express';
+import { asyncRouter } from './async-router.js';
 import { routeToNearestExit } from '../../../shared/pathfinding.js';
 import { activeFloorPlan, currentHazards } from '../floor.js';
 import { getRepo } from '../repositories/index.js';
 
-export const evacuationRoutes = Router();
+export const evacuationRoutes = asyncRouter();
 
 /** 현재 활성 도면 — 프론트도 오프라인용 사본을 갖지만, 여기가 단일 진실 소스다. */
 evacuationRoutes.get('/map', async (req, res) => {
