@@ -200,7 +200,14 @@ function log(text, kind = 'info') {
   ul.querySelector('.empty')?.remove();
   const li = document.createElement('li');
   li.className = `log-${kind}`;
-  li.innerHTML = `<span class="time">${new Date().toLocaleTimeString('ko-KR')}</span> ${text}`;
+
+  // 문구에는 지점 이름·구조요청 사유가 섞여 들어온다 — 도면 판독이 만든 값이고
+  // 위치 보고는 인증 없이 들어오므로, 마크업으로 해석되지 않게 텍스트로 넣는다.
+  const time = document.createElement('span');
+  time.className = 'time';
+  time.textContent = new Date().toLocaleTimeString('ko-KR');
+  li.append(time, ` ${text}`);
+
   ul.prepend(li);
   while (ul.children.length > MAX_LOG) ul.lastChild.remove();
 }
