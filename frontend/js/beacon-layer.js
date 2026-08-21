@@ -32,10 +32,20 @@ const RINGS = 3;
  * 색은 뜻을 하나씩만 맡아야 흘깃 봐도 읽힌다. 그래서 비콘은 통째로 보라로 옮기고,
  * 셋을 **밝기로** 구분한다. 모양(마름모/원)도 이미 다르므로 둘이 겹쳐 판단된다.
  */
+/**
+ * 비콘 색 — **블루투스의 파랑**을 쓴다.
+ *
+ * 보라였다. 지도에서 다른 것과 안 겹치는 색이라 골랐는데, 블루투스 기호를
+ * 그리기 시작하니 «파란 룬을 보라로 칠한» 꼴이 됐다. 기호가 이미 무엇인지
+ * 말하고 있으면 색도 그 기호의 색이어야 한다 — 어긋나면 둘 다 약해진다.
+ *
+ * 대피 경로(`--route`)도 파랑이지만 서로 안 헷갈린다. 경로는 굵은 선이고
+ * 비콘은 기호라 모양이 다르다.
+ */
 export const BEACON_COLORS = {
-  real: '#b06bff',      // 도면에 beaconId를 등록한 비콘 — 확정이라 제일 진하다
-  virtual: '#7f6aa8',   // 앱이 자동으로 채우는 가상 비콘 — 진짜가 아니라 탁하다
-  found: '#d8a2ff',     // 걸으면서 찾아낸 실물 비콘 (아직 도면에 안 넣음) — 추정이라 옅다
+  real: '#2f8fd6',      // 도면에 beaconId를 등록한 비콘 — 확정이라 제일 진하다
+  virtual: '#5aa8dd',   // 시뮬레이션 비콘 — 실물이 아니라 옅다
+  found: '#8fcbf0',     // 걸으면서 찾아낸 실물 비콘 (아직 도면에 안 넣음) — 추정이라 옅다
 };
 
 /**
@@ -136,39 +146,56 @@ export function drawBeacons(svg, floorPlan, opts = {}) {
   for (const b of places) {
     const color = b.virtual ? BEACON_COLORS.virtual : BEACON_COLORS.real;
     const on = b.nodeId === selectedNodeId;
-    const s = scale * (on ? 2.4 : 1.9);
+    const s = scale * (on ? 2.6 : 2.0);
 
-    // **비콘이라는 것이 보여야 한다.**
+    // **블루투스 기호를 그대로 쓴다.**
     //
-    // 예전에는 작은 마름모 하나였다. 발표 자료에 넣으려고 화면을 줄이면
-    // 점으로 뭉개져서 «저게 비콘» 인 줄 모른다. 세 겹으로 그린다 —
+    // 마름모는 «표식» 이지 «비콘» 이 아니다. 발표 자료에 넣으면 보는 사람이
+    // 저게 뭔지 모른다. 블루투스 룬은 설명이 필요 없는 기호다 — 이걸 쓰면
+    // 범례를 안 봐도 «무선 송신기» 로 읽힌다.
     //
-    //   후광     어두운 판에서 자리를 잡아 준다
-    //   마름모   지점(원)과 헷갈리지 않게 모양을 달리한다
-    //   전파선   비콘이 «신호를 낸다» 는 것을 정지 화면에서도 말한다
-    //
-    // 전파선이 핵심이다. 마름모만으로는 «표식» 이고, 호 두 개가 붙으면
-    // «송신기» 로 읽힌다.
-    add(svg, 'circle', {
-      cx: b.x, cy: b.y, r: s * 2.1,
-      fill: color, 'fill-opacity': b.virtual ? 0.1 : 0.16,
+    // 전파 호는 **양쪽으로** 낸다. 한쪽에만 있으면 그쪽으로 쏘는 지향성
+    // 안테나처럼 보이는데, 비콘은 사방으로 뿌린다.
+    const g = add(svg, 'g', {
+      transform: `translate(${b.x} ${b.y}) scale(${s / 12})`,
+      opacity: b.virtual ? 0.85 : 1,
     });
-    add(svg, 'polygon', {
-      points: `${b.x},${b.y - s} ${b.x + s},${b.y} ${b.x},${b.y + s} ${b.x - s},${b.y}`,
-      fill: color, 'fill-opacity': b.virtual ? 0.75 : 1,
-      stroke: '#0b0f14', 'stroke-width': scale * 0.34,
+
+    // 어두운 판에서 자리를 잡아 주는 후광
+    add(g, 'circle', { cx: 0, cy: 0, r: 13, fill: color, 'fill-opacity': b.virtual ? 0.14 : 0.22 });
+
+    // 블루투스 룬. 12x12 를 원점 가운데로 옮겨 그린다.
+    add(g, 'path', {
+      d: 'M5.71 -4.29L0 -10h-1v7.59L-5.59 -7L-7 -5.59L-1.41 0L-7 5.59L-5.59 7'
+        + 'L-1 2.41V10h1l5.71-5.71L1.41 0l4.3-4.29z'
+        + 'M1 -6.17l1.88 1.88L1 -2.41V-6.17z'
+        + 'M2.88 4.29L1 6.17V2.41l1.88 1.88z',
+      fill: color, stroke: '#0b0f14', 'stroke-width': 0.9, 'stroke-linejoin': 'round',
     });
-    // 위로 퍼지는 전파 호 두 개
-    for (const k of [1.55, 2.25]) {
-      add(svg, 'path', {
-        d: `M ${b.x - s * k} ${b.y - s * k * 0.5}`
-          + ` A ${s * k * 1.25} ${s * k * 1.25} 0 0 1 ${b.x + s * k} ${b.y - s * k * 0.5}`,
-        fill: 'none', stroke: color,
-        'stroke-width': scale * 0.3, 'stroke-linecap': 'round',
-        'stroke-opacity': b.virtual ? 0.55 : 0.85,
-      });
+
+    // 좌우 전파 호 두 쌍.
+    //
+    // **원점을 중심으로 한 원의 조각**으로 그린다. 앞서 «양옆에서 위로
+    // 부푸는 곡선» 으로 그렸더니 반지름이 커지면서 큰 원처럼 보여, 호가
+    // 아니라 도달 범위 원으로 읽혔다. 중심각을 ±42도로 잘라 내면 기호에
+    // 붙은 동심호가 된다 — 블루투스 도안의 그 모양이다.
+    const A = 42 * Math.PI / 180;
+    const sinA = Math.sin(A);
+    const cosA = Math.cos(A);
+    for (const [i, R] of [12, 16.5].entries()) {
+      for (const side of [1, -1]) {
+        const x = side * R * cosA;
+        add(g, 'path', {
+          d: `M ${x.toFixed(2)} ${(-R * sinA).toFixed(2)}`
+            + ` A ${R} ${R} 0 0 ${side > 0 ? 1 : 0} ${x.toFixed(2)} ${(R * sinA).toFixed(2)}`,
+          fill: 'none', stroke: color,
+          'stroke-width': 2.1, 'stroke-linecap': 'round',
+          'stroke-opacity': (b.virtual ? 0.6 : 0.9) * (i ? 0.6 : 1),
+        });
+      }
     }
   }
+
 
   return places;
 }
