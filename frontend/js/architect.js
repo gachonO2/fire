@@ -14,6 +14,7 @@
 import { Api } from './api.js';
 import { renderMap } from './minimap.js';
 import { FloorPlan, validatePlan, findUnreachableNodes, NODE_TYPES } from '../shared/floor-plan.js';
+import { escapeHtml } from './escape.js';
 
 const $ = id => document.getElementById(id);
 
@@ -558,10 +559,10 @@ async function refreshPlanList() {
       <strong>${escapeHtml(p.name)}</strong>
       ${p.active ? '<span class="badge-active">사용 중</span>' : ''}
       ${p.draft ? '<span class="badge-active" style="background:#f59e0b;color:#1f2937">📱 앱에서 접수 · 확인 필요</span>' : ''}
-      <div class="time">${p.id} · 지점 ${p.nodeCount} · 통로 ${p.edgeCount}${p.hasImage ? ' · 도면 이미지 있음' : ''}${p.draft && p.readConfidence ? ` · 판독 신뢰도 ${p.readConfidence}` : ''}${p.draft && p.readEngine ? ` · ${escapeHtml(p.readEngine)}` : ''}</div>
+      <div class="time">${escapeHtml(p.id)} · 지점 ${p.nodeCount} · 통로 ${p.edgeCount}${p.hasImage ? ' · 도면 이미지 있음' : ''}${p.draft && p.readConfidence ? ` · 판독 신뢰도 ${escapeHtml(p.readConfidence)}` : ''}${p.draft && p.readEngine ? ` · ${escapeHtml(p.readEngine)}` : ''}</div>
       <div class="actions-inline">
-        <button class="tool-btn" data-load="${p.id}">${p.draft ? '확인하기' : '불러오기'}</button>
-        ${p.active || p.draft ? '' : `<button class="tool-btn" data-activate="${p.id}">사용하기</button>`}
+        <button class="tool-btn" data-load="${escapeHtml(p.id)}">${p.draft ? '확인하기' : '불러오기'}</button>
+        ${p.active || p.draft ? '' : `<button class="tool-btn" data-activate="${escapeHtml(p.id)}">사용하기</button>`}
       </div>
     </li>`).join('') || '<li class="empty">등록된 도면 없음</li>';
 
@@ -620,11 +621,6 @@ function setStatus(text, isError = false) {
   const el = $('save-status');
   el.textContent = text;
   el.style.color = isError ? 'var(--danger)' : 'var(--route)';
-}
-
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 main();
