@@ -308,11 +308,6 @@ export default function App() {
           shotCount={shots.length}
           serverOnline={online}
           onCaptured={shot => { setPending(shot); setPhase(PHASE.REVIEW); }}
-          onSimulateFire={simulateFire}
-          onMagCheck={() => setPhase(PHASE.MAGCHECK)}
-          onField={() => setPhase(PHASE.FIELD)}
-          onLive={() => setPhase(PHASE.LIVE)}
-          onMagSurvey={() => setPhase(PHASE.MAGSURVEY)}
           onClose={backHome}
         />
       )}

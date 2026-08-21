@@ -528,65 +528,133 @@ function drawSensors() {
   if (!vb) { svg.innerHTML = ''; return; }
   svg.setAttribute('viewBox', vb);
 
-  const list = (sensors || []).filter(x => x?.nodeId && Number.isFinite(x.celsius));
+  const list = (sensors || []).filter(x => x?.nodeId && Number.isFinite(x.value));
   if (!list.length) { svg.innerHTML = ''; return; }
 
   const u = Number(vb.split(/\s+/)[2]) / 400;
-  const now = Date.now();
-  svg.innerHTML = list.map(x => {
-    const n = plan.getNode?.(x.nodeId) ?? plan.nodes.find(m => m.id === x.nodeId);
-    if (!n) return '';
-    const c = x.celsius;
-    const state = c >= TEMP.BLOCK ? 'block' : c >= TEMP.WARN ? 'warn' : 'ok';
-    const stale = now - (x.ts ?? now) > TEMP.STALE_MS;
-    const tint = { ok: '#4d9fff', warn: '#e79a3c', block: '#ff4438' }[state];
-    // **우는 감지기는 크게, 조용한 감지기는 작게.**
-    //
-    // 여섯 개를 다 같은 크기로 그렸더니 «어느 것이 우나» 를 숫자로 읽어야
-    // 알 수 있었다. 이 화면에서 감지기의 값어치는 «불이 났다는 것을 기계가
-    // 먼저 안다» 를 보여 주는 것이고, 그러려면 우는 하나가 흘깃 봐도 튀어야
-    // 한다. 정상인 다섯은 «다 재고 있다» 만 말하면 되므로 작아도 된다.
-    const loud = state !== 'ok';
-    const k = loud ? 1.45 : 1;
-    const w = u * 9.4 * k;
-    const h = u * 4.6 * k;
-    // **배지를 지점 오른쪽에 붙인다.**
-    //
-    // 밑에 뒀더니 불난 통로의 「화재 · 1분 4초째」 글씨와 겹쳐서, 화면에는
-    // 「화재 · 4초째」 로 읽혔다 — 방금 난 불처럼 보인다. 통로 글씨와 경로는
-    // 세로로 쌓이고 배지는 가로로 비켜서면 서로 안 밟는다.
-    // 경보 중이면 테를 두껍게 하고 맥이 뛴다 — 숫자만으로는 여섯 개 중 어느
-    // 것이 우는지 흘깃 봐서 안 갈린다.
-    // 경고(45℃)부터 맥이 뛴다. 차단(60℃)에서만 뛰게 했더니 «올라가는 중» 이
-    // 화면에서 통째로 빠졌다 — 관제가 대비할 시간이 그 구간이다.
-    const ring = loud
-      ? `<circle cx="${n.x}" cy="${n.y}" r="${u * 4}" fill="${tint}" opacity=".18">
-           <animate attributeName="opacity" values=".28;.06;.28"
-             dur="${state === 'block' ? 1 : 1.8}s" repeatCount="indefinite"/>
-         </circle>
-         <circle cx="${n.x}" cy="${n.y}" r="${u * 3.4}" fill="none" stroke="${tint}"
-           stroke-width="${u * 0.9}" opacity=".9">
-           <animate attributeName="r" values="${u * 3}; ${u * 9}; ${u * 3}"
-             dur="${state === 'block' ? 1.2 : 2.2}s" repeatCount="indefinite"/>
-           <animate attributeName="opacity" values="1;0;1"
-             dur="${state === 'block' ? 1.2 : 2.2}s" repeatCount="indefinite"/>
-         </circle>` : '';
-    return `${ring}
-      <circle cx="${n.x}" cy="${n.y}" r="${u * 1.5 * k}" fill="${tint}"
-        stroke="rgba(8,10,14,.9)" stroke-width="${u * 0.5}" opacity="${stale ? 0.45 : 1}"/>
-      <rect x="${n.x + u * 2.4}" y="${n.y - h / 2}" width="${w}" height="${h}" rx="${u * 1.2}"
-        fill="${tint}" opacity="${stale ? 0.4 : 0.95}"
-        stroke="rgba(8,10,14,.75)" stroke-width="${u * 0.4}"/>
-      <text x="${n.x + u * 2.4 + w / 2}" y="${n.y + u * 1.15 * k}" text-anchor="middle"
-        font-size="${u * 3.1 * k}" font-weight="800" fill="#0b0f14"
-        >${Math.round(c)}°C${stale ? ' ⚠' : ''}</text>
-      ${loud ? `<text x="${n.x + u * 2.4 + w / 2}" y="${n.y - h * 0.62}" text-anchor="middle"
-        font-size="${u * 2.9}" font-weight="800" fill="${tint}"
-        paint-order="stroke" stroke="rgba(8,10,14,.9)" stroke-width="${u}"
-        >${state === 'block' ? '열감지 · 통로 차단' : '열감지 · 온도 상승'}</text>` : ''}`;
-  }).join('');
+
+  // **한 자리에 감지기 두 대가 붙어 있다** (연기 + 열). 같은 좌표에 겹쳐
+  // 그리면 둘 다 못 읽으므로, 지점마다 묶어서 좌우로 나눠 놓는다.
+  const byNode = new Map();
+  for (const x of list) {
+    const arr = byNode.get(x.nodeId) || [];
+    arr.push(x);
+    byNode.set(x.nodeId, arr);
+  }
+
+  const out = [];
+  for (const [nodeId, pair] of byNode) {
+    const n = plan.getNode?.(nodeId) ?? plan.nodes.find(m => m.id === nodeId);
+    if (!n) continue;
+    pair.sort((a, b) => (a.kind === 'smoke' ? -1 : 1));   // 연기가 위
+    pair.forEach((x, i) => out.push(device(x, n, i, u)));
+  }
+  svg.innerHTML = out.join('');
 }
 
+/** 상태별 색. 예비경보는 «아직 확정 아님» 이라 노랑, 화재는 빨강. */
+const DET_TINT = {
+  normal: '#4d9fff', 'pre-alarm': '#e79a3c', alarm: '#ff4438', fault: '#8b949e',
+};
+
+/**
+ * 감지기 한 대를 **기기처럼** 그린다.
+ *
+ * 숫자만 떠 있으면 «어디서 온 값인지» 를 모른다. 실제 천장 감지기는 둥근
+ * 몸통에 살이 난 원반이고, 연기와 열은 생김새가 다르다. 그 차이를 그대로
+ * 그리면 색을 안 봐도 종류가 갈린다 —
+ *
+ *   연기감지기   살이 난 원반 (공기가 드나드는 틈)
+ *   열감지기     매끈한 원반에 가운데 감열부
+ *
+ * 곁에 회선 주소(L1-003)를 적는다. 실제 수신기가 기기를 부르는 이름이고,
+ * 무전으로 「L1-003 확인」 이라고 말할 수 있어야 화면이 현장과 이어진다.
+ */
+function device(x, n, slot, u) {
+  const tint = DET_TINT[x.state] || DET_TINT.normal;
+  const loud = x.state === 'alarm' || x.state === 'pre-alarm';
+  const r = u * (loud ? 3.2 : 2.4);
+  // 두 대를 좌우로 벌린다. 화재 글씨와 경로는 세로로 쌓이므로 가로가 안전하다.
+  const left = slot === 0;
+  const cx = n.x + (left ? -u * 4.2 : u * 4.2);
+  const cy = n.y - u * 1.2;
+
+  // **글씨는 각자 바깥쪽으로 자란다.**
+  //
+  // 가운데 정렬로 뒀더니 두 대의 값이 서로 겹쳐 「49.6236.6°C」 로 읽혔다.
+  // 왼쪽 기기는 왼쪽으로, 오른쪽 기기는 오른쪽으로 자라게 하면 사이가
+  // 벌어져서, 값이 길어져도(세 자리 온도) 서로 안 밟는다.
+  const tx = cx + (left ? -r - u * 0.8 : r + u * 0.8);
+  const anchor = left ? 'end' : 'start';
+
+  // 살(vent) — 연기감지기의 생김새. 여덟 개면 작게 줄여도 «틈이 있다» 가 남는다.
+  const vents = x.kind === 'smoke'
+    ? Array.from({ length: 8 }, (_, k) => {
+      const a = (k / 8) * Math.PI * 2;
+      return `<line x1="${(cx + Math.cos(a) * r * 0.45).toFixed(2)}"
+        y1="${(cy + Math.sin(a) * r * 0.45).toFixed(2)}"
+        x2="${(cx + Math.cos(a) * r * 0.85).toFixed(2)}"
+        y2="${(cy + Math.sin(a) * r * 0.85).toFixed(2)}"
+        stroke="${tint}" stroke-width="${(u * 0.42).toFixed(2)}" opacity=".85"/>`;
+    }).join('')
+    : `<circle cx="${cx}" cy="${cy}" r="${(r * 0.42).toFixed(2)}" fill="${tint}"/>`;
+
+  // 우는 감지기는 파문이 퍼진다. 스무 대 중 어느 것이 우는지 흘깃 봐서
+  // 갈려야 하고, 숫자를 읽게 하면 그 시간만큼 늦는다.
+  const ping = loud ? `
+    <circle cx="${cx}" cy="${cy}" r="${r.toFixed(2)}" fill="none" stroke="${tint}"
+      stroke-width="${(u * 0.8).toFixed(2)}">
+      <animate attributeName="r" values="${r.toFixed(2)};${(r * 3.2).toFixed(2)}"
+        dur="${x.state === 'alarm' ? 1.1 : 2}s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values=".95;0"
+        dur="${x.state === 'alarm' ? 1.1 : 2}s" repeatCount="indefinite"/>
+    </circle>` : '';
+
+  // **평상시에는 값만, 울 때만 주소까지.**
+  //
+  // 스무 대에 주소와 값을 다 붙이면 글씨 마흔 개가 도면을 덮는다. 평상시에
+  // 관제가 알아야 하는 것은 «다 정상이다» 뿐이고, 그건 값 하나로 충분하다.
+  // 회선 주소는 무전으로 부를 때 필요한 것이므로 **울 때** 나오면 된다.
+  const dim = x.state === 'normal' ? 0.8 : 1;
+  const val = `${x.value}${x.unit}`;
+  // 예비경보 중에는 «확정까지 몇 초» 를 적는다. 실제 수신기의 축적 구간이고,
+  // 관제가 대비할 시간이 정확히 그 구간이다.
+  const countdown = x.state === 'pre-alarm' && x.verifyLeftMs
+    ? ` · ${Math.ceil(x.verifyLeftMs / 1000)}초 뒤 확정` : '';
+
+  return `<g opacity="${dim}">
+    ${ping}
+    <circle cx="${cx}" cy="${cy}" r="${r.toFixed(2)}" fill="rgba(10,13,18,.82)"
+      stroke="${tint}" stroke-width="${(u * (loud ? 0.9 : 0.6)).toFixed(2)}"/>
+    ${vents}
+    ${loud ? `<text x="${tx.toFixed(2)}" y="${(cy - u * 1.4).toFixed(2)}" text-anchor="${anchor}"
+      font-size="${(u * 2.6).toFixed(2)}" font-weight="700" fill="${tint}"
+      paint-order="stroke" stroke="rgba(8,10,14,.92)" stroke-width="${(u * 0.9).toFixed(2)}"
+      >${x.address}</text>` : ''}
+    <text x="${tx.toFixed(2)}" y="${(cy + u * 1.1).toFixed(2)}" text-anchor="${anchor}"
+      font-size="${(u * (loud ? 3.4 : 2.7)).toFixed(2)}" font-weight="800" fill="${tint}"
+      paint-order="stroke" stroke="rgba(8,10,14,.92)" stroke-width="${(u * 1).toFixed(2)}"
+      >${val}</text>
+    ${loud ? `<text x="${tx.toFixed(2)}" y="${(cy + u * 4.4).toFixed(2)}" text-anchor="${anchor}"
+      font-size="${(u * 2.5).toFixed(2)}" font-weight="700" fill="${tint}"
+      paint-order="stroke" stroke="rgba(8,10,14,.92)" stroke-width="${(u * 0.9).toFixed(2)}"
+      >${x.kind === 'smoke' ? '연기' : '열'} ${DET_STATE[x.state]}${countdown}</text>` : ''}
+    <title>${x.address} · ${x.typeLabel} · ${x.label}
+${val} (작동 ${x.alarmAt}${x.unit}) · ${DET_STATE[x.state]}</title>
+  </g>`;
+}
+
+const DET_STATE = {
+  normal: '정상', 'pre-alarm': '예비경보', alarm: '화재', fault: '통신불량',
+};
+
+/**
+ * 위험이 «어디에» 있는가.
+ *
+ * 기본은 통로의 가운데다. 다만 사진 시나리오의 불은 사용자가 사진에 직접
+ * 찍어 준 자리가 있으므로 그것을 우선한다 — 통로 중점으로 옮기면 사용자가
+ * 그린 그림과 화면이 어긋난다.
+ */
 function hazardCenter(edgeId) {
   if (edgeId === PHOTO_SCENARIO.fireEdgeId && api.floorPlan?.id === PHOTO_SCENARIO.planId) {
     return { x: PHOTO_SCENARIO.fire[0], y: PHOTO_SCENARIO.fire[1] };

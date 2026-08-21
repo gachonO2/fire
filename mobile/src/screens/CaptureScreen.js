@@ -82,7 +82,7 @@ async function shrink(uri, rect = null) {
 const FRAME_WIDTH_RATIO = 0.86;
 const FRAME_ASPECT = 4 / 3;
 
-export default function CaptureScreen({ onCaptured, onSimulateFire, onMagCheck, onField, onLive, onMagSurvey, onClose, shotCount = 0, serverOnline = false }) {
+export default function CaptureScreen({ onCaptured, onClose, shotCount = 0, serverOnline = false }) {
   const [permission, requestPermission] = useCameraPermissions();
   const [aligned, setAligned] = useState(false);
   const [hint, setHint] = useState('도면을 틀 안에 맞춰주세요');
@@ -325,41 +325,15 @@ export default function CaptureScreen({ onCaptured, onSimulateFire, onMagCheck, 
           </Pressable>
         )}
 
-        {/* 온도 센서가 아직 없으므로, 서버 신호를 흉내내 전체 흐름을 시험한다 */}
-        <Pressable style={styles.devBtn} onPress={onSimulateFire}
-                   accessibilityRole="button"
-                   accessibilityLabel="개발용. 화재 신호 모의 발생">
-          <Text style={styles.devText}>🔧 화재 신호 모의 발생 (개발용)</Text>
-        </Pressable>
+        {/* **여기에 도구 버튼을 두지 않는다.**
 
-        {/* 맥 스캐너가 잡은 위치를 그대로 본다. 답사가 제대로 됐는지 **그 자리에서**
-            확인하는 화면이라, 대피 안내를 시작하지 않고 위치만 본다. */}
-        <Pressable style={styles.devBtn} onPress={onLive}
-                   accessibilityRole="button"
-                   accessibilityLabel="실시간 위치 보기">
-          <Text style={styles.devText}>📍 실시간 위치 (전파만)</Text>
-        </Pressable>
+            촬영 화면의 일은 하나다 — 도면을 찍는 것. 그런데 도구 다섯 개가
+            아래에 쌓이면서 셔터가 화면 위쪽으로 밀려 올라갔고, 한 손으로
+            폰을 들고 도면을 겨누는 자세에서 엄지가 안 닿는 자리가 됐다.
 
-        {/* 지자기를 측위에 쓸 수 있는지 재보는 도구. 시각장애인용이 아니라 측량하는 사람용이다. */}
-        <Pressable style={styles.devBtn} onPress={onMagCheck}
-                   accessibilityRole="button"
-                   accessibilityLabel="개발용. 지자기 재현성 검사">
-          <Text style={styles.devText}>🧭 지자기 재현성 검사 (개발용)</Text>
-        </Pressable>
-
-        {/* 재현성이 통과한 뒤에 쓰는 화면. 통로를 걸으며 무늬를 남긴다. */}
-        <Pressable style={styles.devBtn} onPress={onMagSurvey}
-                   accessibilityRole="button"
-                   accessibilityLabel="지자기 지문 측량">
-          <Text style={styles.devText}>🧲 지자기 지문 측량</Text>
-        </Pressable>
-
-        {/* 보폭·층고·나침반 안정도 — 코드에 박힌 가정값을 실측으로 바꾸는 도구 */}
-        <Pressable style={styles.devBtn} onPress={onField}
-                   accessibilityRole="button"
-                   accessibilityLabel="개발용. 현장 측정">
-          <Text style={styles.devText}>📐 현장 측정 (개발용)</Text>
-        </Pressable>
+            게다가 그 다섯은 전부 **홈 화면에 이미 있다** — 화재 모의는 홈
+            버튼으로, 나머지 넷은 「도구」 안에 있다. 같은 것을 두 군데 두면
+            한쪽만 고치는 날이 오고, 그때 두 화면이 다른 말을 한다. */}
       </View>
     </View>
   );
@@ -398,11 +372,9 @@ const styles = StyleSheet.create({
   shutterInner: { width: 58, height: 58, borderRadius: 29, backgroundColor: '#fff' },
   linkBtn: { paddingVertical: 10, paddingHorizontal: 18 },
   linkText: { color: '#fff', fontSize: 16, textDecorationLine: 'underline' },
-  devBtn: { paddingVertical: 8, paddingHorizontal: 14, marginTop: 4 },
   // 나가는 길은 개발용 링크보다 크고 진하게 — 여기 갇히면 앱을 껐다 켜야 한다
   backBtn: { minHeight: 48, justifyContent: 'center', paddingHorizontal: 14, marginTop: 6 },
   backText: { color: theme.text, fontSize: 16 },
-  devText: { color: 'rgba(255,255,255,0.45)', fontSize: 12 },
   permTitle: { color: theme.text, fontSize: 20, fontWeight: '700' },
   permBody: { color: theme.textDim, fontSize: 15, textAlign: 'center', lineHeight: 22 },
   primaryBtn: {
