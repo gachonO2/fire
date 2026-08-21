@@ -13,7 +13,7 @@
     "sync": "node scripts/sync-shared.mjs",
     "sync:app": "node scripts/sync-app.mjs",
     "start": "npm run sync && node backend/src/server.js",
-    "test": "npm run sync && node test/route.test.mjs && node test/positioning.test.mjs && node test/step-detect.test.mjs && node test/north.test.mjs && node test/a11y-contract.test.mjs && node test/orthogonal.test.mjs && node test/wall-route.test.mjs && node test/ble-decode.test.mjs && node test/photo-scenario.test.mjs && node test/plan-reader.test.mjs && node test/fusion.test.mjs && node test/altitude.test.mjs && node test/magnetic.test.mjs && node test/tracking.test.mjs && node test/beacon-map.test.mjs && node test/survey-remap.test.mjs && node test/hazard-spread.test.mjs && node test/walk-survey.test.mjs && node test/heat-sensors.test.mjs && node test/stair-descent.test.mjs && node backend/test/api.test.mjs",
+    "test": "npm run sync && node test/route.test.mjs && node test/positioning.test.mjs && node test/step-detect.test.mjs && node test/north.test.mjs && node test/a11y-contract.test.mjs && node test/orthogonal.test.mjs && node test/wall-route.test.mjs && node test/ble-decode.test.mjs && node test/photo-scenario.test.mjs && node test/plan-reader.test.mjs && node test/fusion.test.mjs && node test/altitude.test.mjs && node test/magnetic.test.mjs && node test/tracking.test.mjs && node test/beacon-map.test.mjs && node test/survey-remap.test.mjs && node test/hazard-spread.test.mjs && node test/walk-survey.test.mjs && node test/heat-sensors.test.mjs && node test/stair-descent.test.mjs && node test/detectors.test.mjs && node backend/test/api.test.mjs",
     "detector": "python -m uvicorn app:app --host 127.0.0.1 --port 8001 --app-dir ml/detector"
   },
   "engines": {

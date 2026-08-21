@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { TEMP, temperatureHazard, isStale, HAZARD_RULES } from '../../../shared/hazard-rules.js';
 import { tick as heatTick } from '../heatSensors.js';
+import { SPEC, VERIFY_MS, panelSummary } from '../../../shared/detectors.js';
 import { activeFloorPlan } from '../floor.js';
 import { getRepo } from '../repositories/index.js';
 
@@ -68,7 +69,14 @@ sensorRoutes.get('/sensors', async (req, res) => {
     hazard: temperatureHazard(s.celsius),
     stale: isStale(s, now),
   }));
-  res.json({ sensors, thresholds: { warn: TEMP.WARN, block: TEMP.BLOCK, staleMs: TEMP.STALE_MS } });
+  // 수신기 표시반 한 줄 — 관제가 「지금 정상인가」 를 한눈에 읽는 값
+  res.json({
+    sensors,
+    panel: panelSummary(sensors),
+    spec: SPEC,
+    verifyMs: VERIFY_MS,
+    thresholds: { warn: TEMP.WARN, block: TEMP.BLOCK, staleMs: TEMP.STALE_MS },
+  });
 });
 
 sensorRoutes.delete('/sensors/:sensorId', async (req, res) => {

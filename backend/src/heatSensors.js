@@ -38,6 +38,9 @@
  */
 
 import { SPREAD } from '../../shared/hazard-spread.js';
+import { DETECTOR, Detector, SPEC, STATE } from '../../shared/detectors.js';
+
+const SPEC_SMOKE = SPEC.smoke;
 import { activeFloorPlan } from './floor.js';
 import { getRepo } from './repositories/index.js';
 
@@ -65,18 +68,28 @@ import { getRepo } from './repositories/index.js';
  * 죽으면 안 되고, 그 도면에는 그 도면의 분기점이 있을 것이다.
  */
 export const HEAT_SPOTS = [
-  { id: 'SIM-HEAT-NS3', nodeId: 'J_NS3', label: 'NORTH STREET 서쪽' },
-  { id: 'SIM-HEAT-NS4', nodeId: 'J_NS4', label: 'NORTH STREET 동쪽' },
-  { id: 'SIM-HEAT-ALLEY', nodeId: 'J_ALLEY', label: 'LOCKER ALLEYWAY' },
-  { id: 'SIM-HEAT-SS1', nodeId: 'J_SS1', label: 'SOUTH STREET 서쪽' },
-  { id: 'SIM-HEAT-SS2', nodeId: 'J_SS2', label: 'SOUTH STREET 동쪽' },
-  { id: 'SIM-HEAT-ELE', nodeId: 'ELEWAY', label: '엘리베이터 앞' },
-  // 사각지대를 메우는 넷
-  { id: 'SIM-HEAT-EXIT-PT', nodeId: 'EXIT_POINT', label: '비상구 (THE POINT)' },
-  { id: 'SIM-HEAT-EXIT-SM', nodeId: 'EXIT_SEMINAR', label: '비상구 (THE SEMINAR)' },
-  { id: 'SIM-HEAT-EXIT-CW', nodeId: 'EXIT_CW', label: '비상구 (CREATIVE WORKSPACE)' },
-  { id: 'SIM-HEAT-OPEN', nodeId: 'R_OPENOFFICE', label: 'OPEN OFFICE' },
-];
+  // 회선 주소(L1-xx)는 R형 수신기가 기기를 부르는 이름이다. 실제 설비에서
+  // 「3층 L1-14 화재」 처럼 부르므로, 화면과 무전이 같은 이름을 써야 한다.
+  //
+  // **한 자리에 연기와 열을 같이 단다.** 연기는 빨리 울지만 수증기·먼지에
+  // 잘 속고, 열은 느리지만 거의 안 속는다. 둘이 같이 울면 확실하다 —
+  // 실제 설비에서 교차회로(cross-zoning)라고 부르는 구성이 이것이다.
+  { nodeId: 'J_NS3', label: 'NORTH STREET 서쪽' },
+  { nodeId: 'J_NS4', label: 'NORTH STREET 동쪽' },
+  { nodeId: 'J_ALLEY', label: 'LOCKER ALLEYWAY' },
+  { nodeId: 'J_SS1', label: 'SOUTH STREET 서쪽' },
+  { nodeId: 'J_SS2', label: 'SOUTH STREET 동쪽' },
+  { nodeId: 'ELEWAY', label: '엘리베이터 앞' },
+  { nodeId: 'EXIT_POINT', label: '비상구 (THE POINT)' },
+  { nodeId: 'EXIT_SEMINAR', label: '비상구 (THE SEMINAR)' },
+  { nodeId: 'EXIT_CW', label: '비상구 (CREATIVE WORKSPACE)' },
+  { nodeId: 'R_OPENOFFICE', label: 'OPEN OFFICE' },
+].flatMap((spot, i) => [
+  { id: `SIM-SMOKE-${spot.nodeId}`, kind: DETECTOR.SMOKE,
+    address: `L1-${String(i * 2 + 1).padStart(3, '0')}`, ...spot },
+  { id: `SIM-HEAT-${spot.nodeId}`, kind: DETECTOR.HEAT,
+    address: `L1-${String(i * 2 + 2).padStart(3, '0')}`, ...spot },
+]);
 
 /** 평상시 실내 온도(℃) */
 const BASE_C = 23;
@@ -93,6 +106,18 @@ const TICK_MS = 12_000;
 
 /** 불에서 이만큼 떨어지면 사실상 안 오른다 (다 큰 불 반지름의 배수) */
 const REACH = 2.6;
+
+/**
+ * 연기는 **열보다 멀리, 빨리 간다.**
+ *
+ * 열은 공기를 데워야 전해지지만 연기는 천장을 타고 흐른다(ceiling jet).
+ * 그래서 같은 불에서 연기감지기가 먼저 울고, 그 차이가 곧 대피 시간이다.
+ * 이 두 상수가 그 차이를 만든다 — 도달 범위는 1.6배, 시간 상수는 절반.
+ */
+const SMOKE_REACH_X = 1.6;
+const SMOKE_TAU_MS = 22_000;
+/** 불 한가운데의 감광률(%/m). 작동값 15%/m 을 한참 넘는 값이다. */
+const SMOKE_PEAK = 62;
 
 /**
  * 감지기가 뜨거워지는 시간 상수(ms).
@@ -160,6 +185,31 @@ export function heatAt(at, fires = [], jitter = 0) {
   return Math.round(peak * 10) / 10;
 }
 
+/**
+ * 한 지점의 지금 **감광률(%/m)**.
+ *
+ * 열과 같은 꼴이되 세 가지가 다르다 — 더 멀리 가고(1.6배), 더 빨리 차오르며
+ * (τ 22초 vs 45초), **연기 위험은 연기가 제일 세게 만든다.** 화재도 연기를
+ * 내지만, 「연기」 로 표시한 구간이 연기감지기에게는 더 진한 값이다.
+ */
+export function smokeAt(at, fires = [], jitter = 0) {
+  const s = SPEC_SMOKE;
+  let peak = s.base + jitter * 0.5;
+  for (const f of fires) {
+    const type = SPREAD[f.type] ? f.type : 'fire';
+    if (type === 'crowd') continue;
+    const d = distToSegment(at, f);
+    const reach = SPREAD[type].rMax * (f.unit ?? 1) * REACH * SMOKE_REACH_X;
+    if (!reach || d >= reach) continue;
+    const near = 1 - d / reach;
+    const grown = 1 - Math.exp(-Math.max(0, f.elapsedMs || 0) / SMOKE_TAU_MS);
+    // 연기로 표시한 구간이 불보다 진하다 — 그게 그 표시의 뜻이다
+    const top = type === 'smoke' ? SMOKE_PEAK : SMOKE_PEAK * 0.8;
+    peak = Math.max(peak, s.base + (top - s.base) * near * near * grown);
+  }
+  return Math.round(peak * 10) / 10;
+}
+
 /** 점에서 선분까지의 거리. 통로는 선분이므로 이걸로 잰다. */
 function distToSegment(p, seg) {
   const dx = seg.bx - seg.ax;
@@ -209,23 +259,61 @@ export async function tick() {
 
   const out = [];
   for (const s of mounted) {
-    // 지점마다 다른 흔들림 — 여섯 개가 소수점까지 똑같으면 «가짜» 로 읽힌다
-    const jitter = (Math.sin(now / 9000 + s.nodeId.length) + 1) / 2;
-    const celsius = heatAt(s.node, fires, jitter);
+    // 지점마다 다른 흔들림 — 스무 개가 소수점까지 똑같으면 «가짜» 로 읽힌다.
+    // 실제 감지기도 가만히 있어도 값이 조금씩 움직인다.
+    const jitter = (Math.sin(now / 9000 + s.nodeId.length + s.id.length) + 1) / 2;
+    const value = s.kind === DETECTOR.SMOKE
+      ? smokeAt(s.node, fires, jitter)
+      : heatAt(s.node, fires, jitter);
+
+    // **상태 기계는 여기 하나뿐이다.** 화면이 따로 문턱을 들면 언젠가 서로
+    // 다른 말을 하고, 그때 어느 쪽이 맞는지 가릴 방법이 없다.
+    const det = detectorFor(s);
+    det.push(value, now);
+
     await repo.setSensorReading({
-      sensorId: s.id, edgeId: null, nodeId: s.nodeId, celsius,
+      sensorId: s.id, edgeId: null, nodeId: s.nodeId,
+      // 열은 예전 그대로 `celsius` 로도 보낸다 — 온도 문턱으로 통로를 끊는
+      // 기존 경로(`hazardsFromSensors`)가 이 이름을 보고 있다.
+      celsius: s.kind === DETECTOR.HEAT ? value : undefined,
+      ...det.toJSON(now),
     });
-    out.push({ sensorId: s.id, nodeId: s.nodeId, celsius });
+    out.push(det.toJSON(now));
   }
   return out;
 }
+
+/**
+ * 감지기 하나의 상태 기계를 기억해 둔다.
+ *
+ * 축적(«20초 지속되면 화재 확정»)은 **기억이 있어야** 판정된다. 매번 새로
+ * 만들면 매번 «방금 넘었다» 가 되어 영영 확정이 안 된다.
+ */
+const detectors = new Map();
+function detectorFor(spot) {
+  let d = detectors.get(spot.id);
+  if (!d) { d = new Detector(spot); detectors.set(spot.id, d); }
+  return d;
+}
+
+/** 수신기가 보는 목록 — 화면이 이 순서로 그린다 */
+export function detectorList(now = Date.now()) {
+  return [...detectors.values()].map(d => (d.tick(now), d.toJSON(now)));
+}
+
+/** 시나리오 초기화 — 축적 기억까지 지운다 */
+export function resetDetectors() { detectors.clear(); }
 
 /** 서버가 사는 동안 감지기도 산다 */
 export function startHeatSensors() {
   if (timer) return;
   // 첫 보고를 바로 한 번 — 안 그러면 12초 동안 관제에 감지기가 0대로 보인다
   tick().then(r => {
-    if (r.length) console.log(`  열감지기 ${r.length}대 가동 (시뮬레이션 · SIM- 접두)`);
+    if (r.length) {
+      const smoke = r.filter(x => x.kind === 'smoke').length;
+      console.log(`  화재감지기 ${r.length}대 가동 — 연기 ${smoke} · 열 ${r.length - smoke}`
+        + ' (시뮬레이션 · SIM- 접두)');
+    }
   }).catch(() => {});
   timer = setInterval(() => { tick().catch(() => {}); }, TICK_MS);
   timer.unref?.();

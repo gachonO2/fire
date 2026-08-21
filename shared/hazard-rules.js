@@ -66,13 +66,32 @@ export function hazardsFromSensors(sensors = [], floorPlan, now = Date.now()) {
     // (센서 고장·통신 두절 자체는 관제 화면에서 따로 표시한다)
     if (isStale(reading, now)) continue;
 
-    const type = temperatureHazard(reading.celsius);
+    // **연기감지기도 통로를 끊는다.** 예전에는 온도만 봤는데, 실제 화재에서
+    // 먼저 우는 것은 연기 쪽이다. 연기만 보고 대피로를 안 끊으면 열이 올라올
+    // 때까지 기다리는 셈이고, 그 사이가 사람이 지나갈 수 있는 시간이다.
+    //
+    // 다만 **화재로 확정된 것만** 끊는다(`state === 'alarm'`). 예비경보는
+    // 담배 연기 한 모금일 수 있고, 그때마다 대피로가 끊기면 아무도 이
+    // 시스템을 안 믿는다. 확정 판정은 `shared/detectors.js` 한 곳에서만 한다.
+    const confirmed = reading.state === 'alarm';
+    const type = reading.kind === 'smoke'
+      ? (confirmed ? 'smoke' : null)
+      : reading.state
+        ? (confirmed ? 'heat' : reading.state === 'pre-alarm' ? 'warm' : null)
+        // 상태를 안 실어 보내는 옛 판독값(실물 온도계 등)은 온도로만 판정한다
+        : temperatureHazard(reading.celsius);
     if (!type) continue;
 
+    const shown = Number.isFinite(reading.value) ? reading.value : reading.celsius;
+    const unit = reading.unit || '°C';
     const hazard = {
       type,
-      label: `${HAZARD_RULES[type].label} ${Math.round(reading.celsius)}°C`,
+      label: `${HAZARD_RULES[type].label} ${Math.round(shown)}${unit}`,
       celsius: reading.celsius,
+      value: shown,
+      unit,
+      kind: reading.kind || 'heat',
+      address: reading.address,
       sensorId: reading.sensorId,
       source: 'temperature',
     };

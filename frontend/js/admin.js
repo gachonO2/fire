@@ -502,91 +502,153 @@ const HAZARD_WORD = { fire: '화재', smoke: '연기', crowd: '혼잡', temp: '�
   heat: '과열', warm: '온도 상승', blocked: '차단' };
 
 /**
+ * 화재감지기 — **천장에 달린 물건으로 세운다.**
+ *
+ * ## 왜 SVG 가 아니라 DOM 인가
+ *
+ * 지도 위 SVG 레이어에 그리면 판이 기울 때 감지기도 같이 눕는다. 그러면
+ * 천장 기기가 «바닥에 붙인 스티커» 로 보이고, 무엇보다 45도 눕은 글씨는
+ * 안 읽힌다. 비상구 표지판이 이미 겪은 문제이고 답도 같다 — 무대가 건
+ * 회전을 CSS 로 역순으로 되돌려 **각도와 상관없이 정면을 보게** 한다.
+ *
+ * ## 왜 빨강인가
+ *
+ * 소방설비는 빨강이다. 파란 점으로 그리면 «저게 소방설비» 로 안 읽힌다.
+ * 다만 관제에서 빨강은 «지금 봐라» 이기도 해서, 스무 대를 다 선명하게
+ * 칠하면 평상시 화면이 온통 경보처럼 보이고 진짜 경보가 묻힌다.
+ *
+ * 그래서 **같은 빨강의 밝기를 나눈다** — 평상시는 어두운 벽돌색, 울면
+ * 선명해지며 파문이 퍼진다. 색상이 안 바뀌므로 정체는 안 흔들린다.
+ */
+function drawSensors() {
+  const box = document.getElementById('dets');
+  const stack = document.getElementById('map-stack');
+  const plan = api.floorPlan;
+  if (!box || !stack || !plan) return;
+  const w = wallData?.width || plan.image?.width;
+  if (!w) { box.innerHTML = ''; return; }
+
+  const list = (sensors || []).filter(x => x?.nodeId && Number.isFinite(x.value));
+  if (!list.length) { box.innerHTML = ''; return; }
+
+  box.style.width = `${w}px`;
+  box.style.height = `${wallData?.height || plan.image?.height || w}px`;
+  box.style.transform = `scale(${stack.offsetWidth / w})`;
+  const u = w / 400;
+  box.style.setProperty('--dw', `${u * 11}px`);
+  box.style.setProperty('--dh', `${u * 15}px`);
+  box.style.setProperty('--dv', `${u * 2.9}px`);
+  box.style.setProperty('--da', `${u * 2.4}px`);
+
+  // 한 자리에 두 대(연기+열)가 있다. 겹쳐 놓으면 둘 다 못 읽으므로 좌우로 벌린다.
+  const byNode = new Map();
+  for (const x of list) {
+    const arr = byNode.get(x.nodeId) || [];
+    arr.push(x);
+    byNode.set(x.nodeId, arr);
+  }
+
+  const out = [];
+  for (const [nodeId, pair] of byNode) {
+    const n = plan.getNode?.(nodeId) ?? plan.nodes.find(m => m.id === nodeId);
+    if (!n || !Number.isFinite(n.x)) continue;
+    pair.sort((a, b) => (a.kind === 'smoke' ? -1 : 1));   // 연기가 왼쪽
+    pair.forEach((x, i) => out.push(detBadge(x, n, i, u)));
+  }
+  box.innerHTML = out.join('');
+}
+
+const DET_STATE = {
+  normal: '정상', 'pre-alarm': '예비경보', alarm: '화재', fault: '통신불량',
+};
+
+/**
+ * 감지기 한 대.
+ *
+ * 실제 천장 감지기의 **옆모습**을 그린다. 위에서 본 원반은 그냥 동그라미라
+ * 비콘 링과 안 갈리는데, 갓 모양 몸통과 아래로 좁아지는 통풍구는 누구나
+ * 천장에서 본 그 물건이다.
+ *
+ * 종류는 몸통 아래로 가른다 — 몸통이 같아야 «둘 다 감지기» 로 읽힌다.
+ *   연기감지기   아래에서 연기가 피어오른다
+ *   열감지기     아래에서 열이 올라온다 (위를 향한 화살)
+ */
+function detBadge(x, n, slot, u) {
+  const cls = x.state === 'alarm' ? 'loud'
+    : x.state === 'pre-alarm' ? 'pre'
+      : x.state === 'fault' ? 'dead' : '';
+  const c = x.state === 'alarm' ? 'var(--det-alarm)'
+    : x.state === 'pre-alarm' ? 'var(--det-pre)'
+      : x.state === 'fault' ? 'var(--muted)' : 'var(--det-idle)';
+  const loud = x.state === 'alarm' || x.state === 'pre-alarm';
+  // 두 대를 벌리는 폭. 글씨가 상자보다 넓게 자라므로(「224.4°C」·「L1-010 화재」)
+  // 상자 폭이 아니라 **글씨 폭**을 기준으로 잡아야 안 겹친다.
+  const dx = (slot === 0 ? -1 : 1) * u * 10;
+
+  // 예비경보 중에는 «확정까지 몇 초» 를 적는다. 실제 수신기의 축적 구간이고,
+  // 관제가 대비할 시간이 정확히 그 구간이다.
+  const left = x.state === 'pre-alarm' && x.verifyLeftMs
+    ? ` ${Math.ceil(x.verifyLeftMs / 1000)}초` : '';
+  const note = loud
+    ? `${x.address} ${DET_STATE[x.state]}${left}`
+    : x.state === 'fault' ? `${x.address} 통신불량` : '';
+
+  // **평평한 원형 배지 안에 회색 기기.**
+  //
+  // 앞서 돔 모양으로 그렸더니 «외계인 우주선» 이 됐다. 실물 감지기는
+  // 둥근 갓이 맞지만, 20px 로 줄이면 갓과 통풍구가 뭉쳐서 무엇인지 모를
+  // 덩어리가 된다.
+  //
+  // 평면 도안은 다르다 — 납작한 몸통, 빨간 표시등, 아래로 좁아지는 통풍구
+  // 격자. 선이 전부 수평이라 작게 줄여도 안 뭉갠다.
+  //
+  // 그리고 이 도안이 색 문제를 푼다. **배지가 상태를 말하고 기기는 회색으로
+  // 둔다** — 실물 감지기가 흰 플라스틱인 것과도 맞고, 스무 대가 다 빨갛게
+  // 칠해져 평상시 화면이 경보처럼 보이는 일도 없다. 소방설비라는 정체는
+  // 배지의 붉은 계열이 내내 지킨다.
+  const led = x.state === 'alarm' ? '#fff' : '#ff3b2f';
+  // 이름을 `slot` 으로 두면 «두 대 중 몇 번째» 를 뜻하는 인자와 겹친다.
+  const bar = (y, x1, x2) =>
+    `<rect x="${x1}" y="${y}" width="${x2 - x1}" height="1.05" fill="#3c4148"/>`;
+
+  // 아래쪽 통풍구 — 연기는 격자가 트여 있고(공기가 드나든다), 열은 막혀
+  // 있고 가운데 감열부만 있다. 실물의 차이가 그대로다.
+  const grille = x.kind === 'smoke'
+    ? `<path d="M4.6 13.4h14.8l-3.1 4.9H7.7z" fill="#f2f5f8"/>
+       ${bar(14.3, 6.2, 10.9)}${bar(14.3, 12.4, 17.8)}
+       ${bar(16.1, 7.6, 11.3)}${bar(16.1, 12.8, 16.4)}`
+    : `<path d="M4.6 13.4h14.8l-3.1 4.9H7.7z" fill="#cdd4db"/>
+       <rect x="10.4" y="14.6" width="3.2" height="2.6" rx="1.1" fill="#3c4148"/>`;
+
+  // 좌우 벌림은 **바깥 좌표에** 더한다. 안쪽에 `translateX` 를 걸면 그
+  // 변환이 3D 되돌림 뒤에 다시 적용돼 기기가 비스듬히 눕는다.
+  return `<b class="${cls}" style="--x:${n.x + dx}px;--y:${n.y - u * 1.5}px" title="${x.address} · ${x.typeLabel}
+${x.label}
+${x.value}${x.unit} (작동 ${x.alarmAt}${x.unit}) · ${DET_STATE[x.state]}"
+    ><svg viewBox="0 0 24 24" aria-hidden="true">
+      ${loud ? `<circle cx="12" cy="12" r="11" fill="none" stroke="${c}" stroke-width="2">
+        <animate attributeName="r" values="11;17" dur="${x.state === 'alarm' ? 1.1 : 2}s"
+          repeatCount="indefinite"/>
+        <animate attributeName="opacity" values=".9;0" dur="${x.state === 'alarm' ? 1.1 : 2}s"
+          repeatCount="indefinite"/></circle>` : ''}
+      <circle cx="12" cy="12" r="11" fill="${c}"/>
+      <rect x="4.6" y="7.6" width="14.8" height="5.4" fill="#dfe5ec"/>
+      <rect x="12" y="7.6" width="7.4" height="5.4" fill="#aeb7c1"/>
+      <circle cx="12" cy="10.3" r="1.5" fill="${led}"/>
+      ${grille}
+    </svg>
+    <span class="v">${x.value}${x.unit}</span>
+    ${note ? `<span class="a">${note}</span>` : ''}
+  </b>`;
+}
+
+/**
  * 위험이 «어디에» 있는가.
  *
  * 기본은 통로의 가운데다. 다만 사진 시나리오의 불은 사용자가 사진에 직접
  * 찍어 준 자리가 있으므로 그것을 우선한다 — 통로 중점으로 옮기면 사용자가
  * 그린 그림과 화면이 어긋난다.
  */
-/**
- * 열감지기 판독값 — **불이 났다는 것을 기계가 먼저 안다.**
- *
- * 이 숫자가 관제에서 제일 중요하다. 사람이 「화재」를 누르는 것은 시연을
- * 시작하는 동작이고, 그 다음부터는 감지기가 60℃ 를 넘겨 **시스템이 스스로**
- * 통로를 끊는다(`shared/hazard-rules.js` 의 `TEMP.BLOCK`). 그 순간을 화면이
- * 못 보여 주면 «사람이 정해 주면 경로를 다시 그리는 시스템» 으로만 읽힌다.
- *
- * 그래서 위험 레이어보다 **위에** 그린다. 밑에 깔았더니 정작 제일 뜨거운
- * 감지기가 그 불의 불꽃에 통째로 묻혔다.
- */
-function drawSensors() {
-  const svg = document.getElementById('sensor-layer');
-  const base = document.getElementById('admin-map');
-  const plan = api.floorPlan;
-  if (!svg || !base || !plan) return;
-  const vb = base.getAttribute('viewBox');
-  if (!vb) { svg.innerHTML = ''; return; }
-  svg.setAttribute('viewBox', vb);
-
-  const list = (sensors || []).filter(x => x?.nodeId && Number.isFinite(x.celsius));
-  if (!list.length) { svg.innerHTML = ''; return; }
-
-  const u = Number(vb.split(/\s+/)[2]) / 400;
-  const now = Date.now();
-  svg.innerHTML = list.map(x => {
-    const n = plan.getNode?.(x.nodeId) ?? plan.nodes.find(m => m.id === x.nodeId);
-    if (!n) return '';
-    const c = x.celsius;
-    const state = c >= TEMP.BLOCK ? 'block' : c >= TEMP.WARN ? 'warn' : 'ok';
-    const stale = now - (x.ts ?? now) > TEMP.STALE_MS;
-    const tint = { ok: '#4d9fff', warn: '#e79a3c', block: '#ff4438' }[state];
-    // **우는 감지기는 크게, 조용한 감지기는 작게.**
-    //
-    // 여섯 개를 다 같은 크기로 그렸더니 «어느 것이 우나» 를 숫자로 읽어야
-    // 알 수 있었다. 이 화면에서 감지기의 값어치는 «불이 났다는 것을 기계가
-    // 먼저 안다» 를 보여 주는 것이고, 그러려면 우는 하나가 흘깃 봐도 튀어야
-    // 한다. 정상인 다섯은 «다 재고 있다» 만 말하면 되므로 작아도 된다.
-    const loud = state !== 'ok';
-    const k = loud ? 1.45 : 1;
-    const w = u * 9.4 * k;
-    const h = u * 4.6 * k;
-    // **배지를 지점 오른쪽에 붙인다.**
-    //
-    // 밑에 뒀더니 불난 통로의 「화재 · 1분 4초째」 글씨와 겹쳐서, 화면에는
-    // 「화재 · 4초째」 로 읽혔다 — 방금 난 불처럼 보인다. 통로 글씨와 경로는
-    // 세로로 쌓이고 배지는 가로로 비켜서면 서로 안 밟는다.
-    // 경보 중이면 테를 두껍게 하고 맥이 뛴다 — 숫자만으로는 여섯 개 중 어느
-    // 것이 우는지 흘깃 봐서 안 갈린다.
-    // 경고(45℃)부터 맥이 뛴다. 차단(60℃)에서만 뛰게 했더니 «올라가는 중» 이
-    // 화면에서 통째로 빠졌다 — 관제가 대비할 시간이 그 구간이다.
-    const ring = loud
-      ? `<circle cx="${n.x}" cy="${n.y}" r="${u * 4}" fill="${tint}" opacity=".18">
-           <animate attributeName="opacity" values=".28;.06;.28"
-             dur="${state === 'block' ? 1 : 1.8}s" repeatCount="indefinite"/>
-         </circle>
-         <circle cx="${n.x}" cy="${n.y}" r="${u * 3.4}" fill="none" stroke="${tint}"
-           stroke-width="${u * 0.9}" opacity=".9">
-           <animate attributeName="r" values="${u * 3}; ${u * 9}; ${u * 3}"
-             dur="${state === 'block' ? 1.2 : 2.2}s" repeatCount="indefinite"/>
-           <animate attributeName="opacity" values="1;0;1"
-             dur="${state === 'block' ? 1.2 : 2.2}s" repeatCount="indefinite"/>
-         </circle>` : '';
-    return `${ring}
-      <circle cx="${n.x}" cy="${n.y}" r="${u * 1.5 * k}" fill="${tint}"
-        stroke="rgba(8,10,14,.9)" stroke-width="${u * 0.5}" opacity="${stale ? 0.45 : 1}"/>
-      <rect x="${n.x + u * 2.4}" y="${n.y - h / 2}" width="${w}" height="${h}" rx="${u * 1.2}"
-        fill="${tint}" opacity="${stale ? 0.4 : 0.95}"
-        stroke="rgba(8,10,14,.75)" stroke-width="${u * 0.4}"/>
-      <text x="${n.x + u * 2.4 + w / 2}" y="${n.y + u * 1.15 * k}" text-anchor="middle"
-        font-size="${u * 3.1 * k}" font-weight="800" fill="#0b0f14"
-        >${Math.round(c)}°C${stale ? ' ⚠' : ''}</text>
-      ${loud ? `<text x="${n.x + u * 2.4 + w / 2}" y="${n.y - h * 0.62}" text-anchor="middle"
-        font-size="${u * 2.9}" font-weight="800" fill="${tint}"
-        paint-order="stroke" stroke="rgba(8,10,14,.9)" stroke-width="${u}"
-        >${state === 'block' ? '열감지 · 통로 차단' : '열감지 · 온도 상승'}</text>` : ''}`;
-  }).join('');
-}
-
 function hazardCenter(edgeId) {
   if (edgeId === PHOTO_SCENARIO.fireEdgeId && api.floorPlan?.id === PHOTO_SCENARIO.planId) {
     return { x: PHOTO_SCENARIO.fire[0], y: PHOTO_SCENARIO.fire[1] };

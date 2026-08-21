@@ -113,17 +113,30 @@ test('감지기는 분기점·승강기·비상구에 단다', () => {
   // 방 안에만 달면 그 방만 못 쓰게 되고 경로는 그대로다. 분기점과 비상구는
   // 경로가 갈리거나 사람이 모이는 곳이라 «여기가 막히면 저쪽으로» 가 성립한다.
   const ids = HEAT_SPOTS.map(s => s.nodeId);
-  const ok = ids.filter(id =>
+  const spots = [...new Set(ids)];
+  const ok = spots.filter(id =>
     id.startsWith('J_') || id.startsWith('EXIT_') || id === 'ELEWAY');
-  assert.ok(ok.length >= ids.length - 1,
-    `방에 달린 감지기가 너무 많다: ${ids.join(', ')}`);
+  assert.ok(ok.length >= spots.length - 1,
+    `방에 달린 감지기가 너무 많다: ${spots.join(', ')}`);
   assert.ok(HEAT_SPOTS.every(s => s.id.startsWith('SIM-')),
     '시뮬레이션 감지기는 SIM- 으로 표시해야 실물과 구분된다');
 });
 
-test('감지기 id 가 겹치지 않는다', () => {
+test('감지기 id 와 회선 주소가 겹치지 않는다', () => {
+  // 주소가 겹치면 수신기가 두 기기를 한 기기로 보고, 하나가 울어도
+  // 다른 하나의 값으로 덮인다.
   assert.equal(new Set(HEAT_SPOTS.map(s => s.id)).size, HEAT_SPOTS.length);
-  assert.equal(new Set(HEAT_SPOTS.map(s => s.nodeId)).size, HEAT_SPOTS.length);
+  assert.equal(new Set(HEAT_SPOTS.map(s => s.address)).size, HEAT_SPOTS.length);
+});
+
+test('한 자리에 연기와 열을 같이 단다', () => {
+  // 연기는 빨리 울지만 수증기·먼지에 잘 속고, 열은 느리지만 거의 안 속는다.
+  // 둘이 같이 울면 확실하다 — 실제 설비의 교차회로 구성이다.
+  const spots = [...new Set(HEAT_SPOTS.map(s => s.nodeId))];
+  for (const n of spots) {
+    const kinds = HEAT_SPOTS.filter(s => s.nodeId === n).map(s => s.kind).sort();
+    assert.deepEqual(kinds, ['heat', 'smoke'], `${n} 에 한 종류만 있다`);
+  }
 });
 
 let pass = 0;
