@@ -98,6 +98,7 @@ export function beaconPlacements(floorPlan) {
     // 화면이 말해야** 한다.
     return real.map(n => ({
       nodeId: n.id, name: n.name, x: n.x, y: n.y, beaconId: n.beaconId,
+      txPower: n.txPower,
       virtual: String(n.beaconId).startsWith('SIM'),
     }));
   }
@@ -115,8 +116,50 @@ export function beaconPlacements(floorPlan) {
  * @param {FloorPlan} floorPlan
  * @param {Object} opts { showRange, rangeM, selectedNodeId }
  */
+/**
+ * 사람에게 **얼마나 세게 들리는가** (0~1).
+ *
+ * 비콘의 세기는 비콘만 봐서는 못 정한다 — 받는 사람이 있어야 나오는 값이다.
+ * 그래서 «지금 추적 중인 사람» 과의 거리로 잰다. 사람이 여럿이면 **가장
+ * 가까운 사람** 기준이다(그 비콘을 실제로 잡고 있는 사람이 그 사람이다).
+ *
+ * 아무도 없으면 1을 준다. 0을 주면 편집기에서 비콘이 전부 사라지는데,
+ * 거기서는 «누가 얼마나 잘 잡히나» 가 아니라 «어디에 달았나» 를 본다.
+ *
+ * 파동 애니메이션과 **같은 함수를 쓴다.** 따로 계산하면 커진 기호와 약한
+ * 파동이 한 자리에서 서로 다른 말을 한다.
+ */
+export function beaconStrength(b, near, listen) {
+  // **사람이 없으면 기기 자신의 송신 세기로 그린다.**
+  //
+  // 예전에는 1을 돌려줘서 열여덟 개가 지도에서 똑같이 생겼다. 실제로는
+  // 기종·전지 상태·설치 높이·주변 금속에 따라 1m 기준 세기가 −55 ~ −78dBm
+  // 으로 흩어진다. 그 차이가 보여야 «어느 비콘이 약한가» 를 알고, 약한
+  // 것부터 손볼 수 있다.
+  const own = txStrength(b.txPower);
+  if (!near?.length) return own;
+
+  // 사람이 있으면 «그 사람에게 얼마나 세게 들리나» 다. 거리와 송신 세기가
+  // 같이 정한다 — 센 비콘은 멀리서도 잡히고, 약한 비콘은 옆에 있어야 잡힌다.
+  let best = 0;
+  for (const p of near) {
+    if (!Number.isFinite(p?.x)) continue;
+    const d = Math.hypot(b.x - p.x, b.y - p.y);
+    const reach = listen * (0.55 + own * 0.75);
+    if (d < reach) best = Math.max(best, (1 - d / reach) * (0.5 + own * 0.5));
+  }
+  return best;
+}
+
+/** 1m 기준 세기(dBm) → 0~1. −78 이 바닥, −55 가 천장. */
+export function txStrength(txPower) {
+  const tx = Number.isFinite(txPower) ? txPower : -62;
+  return Math.max(0.12, Math.min(1, (tx + 78) / 23));
+}
+
 export function drawBeacons(svg, floorPlan, opts = {}) {
-  const { showRange = true, rangeM = SIM_DEFAULTS.rangeM, selectedNodeId = null } = opts;
+  const { showRange = true, rangeM = SIM_DEFAULTS.rangeM, selectedNodeId = null,
+    near = null } = opts;
   const places = beaconPlacements(floorPlan);
   if (!places.length) return places;
 
@@ -143,10 +186,20 @@ export function drawBeacons(svg, floorPlan, opts = {}) {
     }).textContent = `도달 ${rangeM}m`;
   }
 
+  const listen = (SIM_DEFAULTS.rangeM * 0.8) / (floorPlan.metersPerUnit || 1);
   for (const b of places) {
     const color = b.virtual ? BEACON_COLORS.virtual : BEACON_COLORS.real;
     const on = b.nodeId === selectedNodeId;
-    const s = scale * (on ? 2.6 : 2.0);
+
+    // **세게 들리는 비콘이 크다.**
+    //
+    // 관제가 «지금 어느 비콘이 이 사람을 잡고 있나» 를 흘깃 봐서 알아야
+    // 한다. 숫자(dBm)를 열여덟 개 읽게 하면 그 시간만큼 늦는다.
+    //
+    // 다만 **약한 것도 지운 크기로 남긴다.** 안 그리면 «저기 비콘이 없다»
+    // 로 읽히는데, 있는데 안 들리는 것과 없는 것은 전혀 다른 상태다.
+    const strength = beaconStrength(b, near, listen);
+    const s = scale * (on ? 2.6 : 1.35 + strength * 1.15);
 
     // **블루투스 기호를 그대로 쓴다.**
     //
@@ -158,7 +211,7 @@ export function drawBeacons(svg, floorPlan, opts = {}) {
     // 안테나처럼 보이는데, 비콘은 사방으로 뿌린다.
     const g = add(svg, 'g', {
       transform: `translate(${b.x} ${b.y}) scale(${s / 12})`,
-      opacity: b.virtual ? 0.85 : 1,
+      opacity: (b.virtual ? 0.85 : 1) * (0.45 + strength * 0.55),
     });
 
     // 어두운 판에서 자리를 잡아 주는 후광
@@ -239,19 +292,8 @@ export function startBeaconWaves(waveSvg, getState) {
     // 알고 싶은 건 **지금 누구를 잡고 있나**이고, 그건 사람 옆에서만 울려야 읽힌다.
     // near 가 없으면(도면 편집기) 배치를 보는 게 목적이므로 전부 울린다.
     const listen = span * 0.22;      // 이 안에 사람이 있으면 반응한다
-    const rank = b => {
-      if (!near?.length) return 1;   // 편집기: 전부 같은 세기
-      let best = 0;
-      for (const p of near) {
-        if (!Number.isFinite(p?.x)) continue;
-        const d = Math.hypot(b.x - p.x, b.y - p.y);
-        if (d < listen) best = Math.max(best, 1 - d / listen);
-      }
-      return best;
-    };
-
     for (const b of places) {
-      const strength = rank(b);
+      const strength = beaconStrength(b, near, listen);
       if (strength <= 0.02) continue;          // 사람이 없는 곳은 조용히 둔다
 
       const color = b.virtual ? BEACON_COLORS.virtual : BEACON_COLORS.real;
