@@ -1,12 +1,12 @@
 import { readFileSync } from 'node:fs';
-import { Router } from 'express';
+import { asyncRouter } from './async-router.js';
 import { buildingFloors } from '../building.js';
 import { validatePlan, FloorPlan, findUnreachableNodes } from '../../../shared/floor-plan.js';
 import { getRepo } from '../repositories/index.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { readPlanFromImage, readerStatus } from '../planReader.js';
 
-export const planRoutes = Router();
+export const planRoutes = asyncRouter();
 
 /** 도면 이미지 상한 — Firestore 문서 1MB 제한을 고려한 값 (편집기가 미리 축소해 보낸다) */
 const MAX_IMAGE_BYTES = 900_000;
@@ -104,8 +104,9 @@ planRoutes.put('/plans/:planId/activate', requireAdmin, async (req, res) => {
 
 planRoutes.delete('/plans/:planId', requireAdmin, async (req, res) => {
   const repo = await getRepo();
+  // 활성 도면이 아예 없을 수 있다(등록 전·활성 도면 삭제 후). 그때 active 는 null 이다.
   const active = await repo.getActivePlan();
-  if (active.id === req.params.planId) {
+  if (active?.id === req.params.planId) {
     return res.status(409).json({ error: '사용 중인 도면은 삭제할 수 없습니다.' });
   }
   await repo.deletePlan(req.params.planId);
@@ -256,11 +257,26 @@ function slug(s) {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'plan';
 }
 
-/** 같은 이름으로 여러 번 올려도 덮어쓰지 않게 뒤에 번호를 붙인다 */
+/**
+ * 같은 이름으로 여러 번 올려도 덮어쓰지 않게 뒤에 번호를 붙인다.
+ *
+ * **개수가 아니라 이미 쓰인 번호를 본다.** 개수로 세면 중간 것을 지웠을 때
+ * 번호가 되돌아가 살아 있는 도면을 덮어쓴다 — 3개를 올리고 2번을 지우면
+ * 다음 번호가 다시 3이 되어, 그 자리에 있던 도면과 사진이 사라졌다.
+ * 사진 한 장은 누군가 그 건물까지 걸어가서 찍은 것이라 다시 만들 수 없다.
+ */
 async function nextSuffix(repo, base) {
-  const list = await repo.listPlans();
-  const used = list.filter(p => String(p.id).startsWith(`draft-${base}-`)).length;
-  return used + 1;
+  const prefix = `draft-${base}-`;
+  const used = new Set(
+    (await repo.listPlans())
+      .map(p => String(p.id))
+      .filter(id => id.startsWith(prefix))
+      .map(id => Number(id.slice(prefix.length)))
+      .filter(Number.isInteger),
+  );
+  let n = 1;
+  while (used.has(n)) n++;
+  return n;
 }
 
 /**
