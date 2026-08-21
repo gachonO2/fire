@@ -50,6 +50,31 @@ export function floorOf(planName) {
 /** 대피가 끝나는 층. 지상 출입구가 있는 층이다. */
 export const GROUND_FLOOR = 1;
 
+/**
+ * **경사지 건물에서는 지상이 두 군데다.**
+ *
+ * 이 건물(가천대 AI공학관 = 제2공학관)은 언덕에 서 있다. 건축 단면도상
+ * «1층» 처럼 보이는 곳이 실제로는 지하1층이고, 지하2층까지 있다. 그리고
+ * 반대쪽 위에서는 **옥상이 운동장과 바로 이어지고 엘리베이터와 직결된다.**
+ *
+ * (근거: 신축 도면 배치도·단면도. 옆 건물인 제3기숙사도 경사지에 있지만
+ *  그건 다른 건물이라 이 값의 근거가 아니다.)
+ *
+ * 그러면 옥상은 «최후의 피난처» 가 아니라 **또 하나의 지상 출입구**다.
+ * 이 구분이 안내를 통째로 바꾼다 —
+ *
+ *   보통 건물   옥상으로 올라가면 고립된다. 무조건 내려가야 한다.
+ *   이 건물     7층 사람은 위로 한 층이 아래로 일곱 층보다 짧고 안전하다.
+ *
+ * 연기는 계단실을 굴뚝처럼 타고 오른다. 위층 사람을 그 굴뚝으로 일곱 층
+ * 내려보내는 것과, 한 층 위 운동장으로 내보내는 것은 전혀 다른 일이다.
+ *
+ * **다만 이 값은 건물마다 사람이 확인해서 넣어야 한다.** 도면에서 읽을 수
+ * 없고, 틀리면 사람을 막다른 옥상으로 올려보내게 된다. 확인 안 된 건물은
+ * 기본값(지상 1층 하나)으로 두는 편이 안전하다.
+ */
+export const AI_HALL_EXIT_LEVELS = Object.freeze([1, 8]);
+
 export const DESCENT_PHASE = {
   /** 아직 층에서 비상구로 가는 중 */
   APPROACH: 'approach',
@@ -77,7 +102,15 @@ export class StairDescent {
    */
   constructor(fromFloor, opts = {}) {
     this.fromFloor = Number.isFinite(fromFloor) ? fromFloor : null;
-    this.ground = opts.groundFloor ?? GROUND_FLOOR;
+    /**
+     * 밖으로 나갈 수 있는 층들. 기본은 지상 1층 하나 — **확인 안 된 건물에서
+     * 옥상을 출구로 치면 사람을 막다른 곳으로 올려보낸다.**
+     */
+    this.exits = (opts.exitLevels?.length ? [...opts.exitLevels]
+      : [opts.groundFloor ?? GROUND_FLOOR]).sort((a, b) => a - b);
+    /** 이번 대피에서 노리는 출구 층. 지금 층에서 제일 가까운 것. */
+    this.target = this._nearestExit(this.fromFloor);
+    this.ground = this.target;
     /** 기압계가 없으면 층을 셀 수 없다. 그 사실을 화면이 알아야 한다. */
     this.hasBarometer = opts.hasBarometer !== false;
     this.phase = DESCENT_PHASE.APPROACH;
@@ -87,10 +120,22 @@ export class StairDescent {
     this.warnedElevator = false;
   }
 
-  /** 내려가야 할 층 수. 모르면 null. */
+  /** 목표 출구까지 남은 층 수(위든 아래든). 모르면 null. */
   get floorsLeft() {
     if (this.floor === null) return null;
-    return Math.max(0, this.floor - this.ground);
+    return Math.abs(this.floor - this.target);
+  }
+
+  /** 위로 가는 대피인가 — 안내 문구가 «내려가세요/올라가세요» 로 갈린다 */
+  get goingUp() {
+    return this.floor !== null && this.target > this.floor;
+  }
+
+  /** 지금 층에서 제일 가까운 출구 층 */
+  _nearestExit(from) {
+    if (!Number.isFinite(from)) return this.exits[0];
+    return this.exits.reduce((best, f) =>
+      Math.abs(f - from) < Math.abs(best - from) ? f : best, this.exits[0]);
   }
 
   /** 계단을 다 내려왔는가 */
@@ -110,12 +155,18 @@ export class StairDescent {
     const left = this.floorsLeft;
     // 층수를 알 때만 말한다. 「몇 개 층」 은 마음의 준비를 만드는 정보라
     // 값어치가 크지만, 틀리면 그만큼 해롭다.
+    const up = this.goingUp;
+    const where = this.target === GROUND_FLOOR ? '1층' : `${this.target}층`;
+    const dir = up ? '올라가세요' : '내려가세요';
     const howFar = left && this.hasBarometer
-      ? ` 여기서 1층까지 ${left}개 층입니다.`
-      : ' 1층까지 내려가야 합니다.';
+      ? ` 여기서 ${where}까지 ${left}개 층입니다.`
+      : ` ${where}까지 ${up ? '올라가야' : '내려가야'} 합니다.`;
+    // 위로 가는 경우에는 **왜** 위인지 한마디 붙인다. 「불났는데 올라가라고?」
+    // 는 사람이 안 따르는 안내이고, 안 따르면 안내가 아니다.
+    const why = up ? ' 이 건물은 옥상이 운동장과 이어져 있습니다.' : '';
     return {
       phase: this.phase,
-      say: `${exitName}입니다. 계단으로 내려가세요.${howFar}`
+      say: `${exitName}입니다. 계단으로 ${dir}.${howFar}${why}`
         + ' 엘리베이터는 타지 마세요.',
     };
   }
@@ -141,15 +192,20 @@ export class StairDescent {
       };
     }
 
-    // 계단으로 움직였다. 내려간 것만 센다 — 올라가는 것은 대피가 아니다.
+    // **목표를 지나쳐 가지 않는다.** 1층으로 내려가는 사람이 지하로 더
+    // 내려가거나, 옥상으로 올라가는 사람이 더 올라갈 곳은 없다.
     if (this.floor !== null) {
-      this.floor = Math.max(this.ground, this.floor + change.floors);
+      const next = this.floor + change.floors;
+      this.floor = this.target >= this.fromFloor
+        ? Math.min(this.target, Math.max(this.fromFloor, next))
+        : Math.max(this.target, Math.min(this.fromFloor, next));
     }
     this.phase = this.floorsLeft === 0
       ? DESCENT_PHASE.GROUND : DESCENT_PHASE.DESCENDING;
 
     if (this.phase === DESCENT_PHASE.GROUND) {
-      return { ...this._state(), say: '1층입니다. 건물 밖으로 나가세요.' };
+      const where = this.target === GROUND_FLOOR ? '1층' : '옥상';
+      return { ...this._state(), say: `${where}입니다. 건물 밖으로 나가세요.` };
     }
     // 층이 바뀔 때마다 알린다. 눈으로 벽의 층 번호를 읽을 수 없으므로,
     // 이것이 «내가 어디쯤인가» 를 아는 유일한 통로다.
@@ -158,7 +214,7 @@ export class StairDescent {
       ...this._state(),
       say: this.floor !== null
         ? `${this.floor}층입니다. ${left}개 층 남았습니다.`
-        : '한 층 내려왔습니다.',
+        : `한 층 ${this.goingUp ? '올라왔습니다' : '내려왔습니다'}.`,
     };
   }
 
@@ -168,7 +224,7 @@ export class StairDescent {
    * 다른 문제다.
    */
   markGround() {
-    this.floor = this.ground;
+    this.floor = this.target;
     this.phase = DESCENT_PHASE.GROUND;
     return { ...this._state(), say: '1층입니다. 건물 밖으로 나가세요.' };
   }
@@ -180,6 +236,7 @@ export class StairDescent {
   }
 
   _state() {
-    return { phase: this.phase, floor: this.floor, floorsLeft: this.floorsLeft };
+    return { phase: this.phase, floor: this.floor, floorsLeft: this.floorsLeft,
+      target: this.target, goingUp: this.goingUp };
   }
 }
