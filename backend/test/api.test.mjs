@@ -376,5 +376,48 @@ await api('/api/plans/hospital-3f/activate', { method: 'PUT' });
 const hz3 = await api('/api/hazards');
 expect('도면 복귀 후 시나리오 초기화 → E6만 남음', Object.keys(hz3.body).join() === 'E6');
 
+// 43) 활성 도면이 없을 때 도면을 지워도 서버가 죽지 않는다.
+// 예전에는 active.id 를 그냥 읽어 TypeError 가 났고, Express 4 는 async 핸들러의
+// 거부를 잡지 못해 **프로세스가 통째로 내려갔다.**
+await api('/api/plans', { method: 'POST', body: JSON.stringify({ ...DEMO_PLAN, id: 'orphan', name: '고아 도면' }) });
+const noActive = await api('/api/plans/orphan', { method: 'DELETE' });
+expect('활성 도면 없을 때 삭제해도 죽지 않음', noActive.status < 500, `status ${noActive.status}`);
+expect('삭제 뒤에도 서버 생존', (await api('/api/health')).body.ok === true);
+
+// 44) 초안 번호는 이미 쓰인 번호를 피한다 — 개수로 세면 중간 것을 지운 뒤
+// 번호가 되돌아가 살아 있는 도면과 사진을 덮어쓴다.
+const draft = name => api('/api/plans/draft', {
+  method: 'POST',
+  body: JSON.stringify({ name, dataUri: tinyPng, width: 100, height: 100 }),
+});
+const draftIds = [];
+for (let i = 0; i < 3; i++) draftIds.push((await draft('번호 시험')).body.planId);
+// **가운데** 것을 지운다. 마지막을 지우면 개수로 세는 옛 방식도 우연히 맞아떨어져
+// 회귀를 못 잡는다. 가운데를 지워야 번호가 되돌아가며 마지막 것을 덮어쓴다.
+await api(`/api/plans/${draftIds[1]}`, { method: 'DELETE' });
+const reborn = (await draft('번호 시험')).body.planId;
+const after = (await api('/api/plans')).body.map(p => p.id);
+// 개수로 센다. 덮어쓰기는 id 를 남긴 채 **내용만** 바꾸므로 id 존재 여부로는 안 보인다.
+// 3개 올리고 1개 지운 뒤 1개 더 올렸으니 살아 있어야 할 초안은 3개다.
+const draftCount = after.filter(id => id.startsWith('draft-plan-')).length;
+expect('초안 번호가 살아 있는 도면을 덮어쓰지 않음', draftCount === 3,
+  `${draftIds.join(',')} 중 ${draftIds[1]} 삭제 → ${reborn} · 남은 초안 ${draftCount}개`);
+
+// 45) 화재수신기가 모르는 유형을 보내면 거부한다.
+// 저장은 되지만 경로탐색이 보는 위험 맵에서는 조용히 빠져, 관제 화면에는 막힌
+// 통로가 떠 있는데 앱은 그리로 안내하게 된다.
+const badPanel = await api('/api/sensors/fire-panel', {
+  method: 'POST', body: JSON.stringify({ sensorId: 'FP-9', edgeId: 'E6', type: 'bogus' }),
+});
+expect('알 수 없는 수신기 유형은 400', badPanel.status === 400);
+
+// 46) 보호자 코드는 서로 겹치지 않는다 — 겹치면 남의 대피 상황이 보인다
+const codes = new Set();
+for (let i = 0; i < 30; i++) {
+  const g = await api('/api/guardians', { method: 'POST', body: JSON.stringify({ userId: `code-${i}`, name: '보호자' }) });
+  codes.add(g.body.code);
+}
+expect('보호자 코드 30개가 모두 다름', codes.size === 30);
+
 server.close();
 process.exit(failed ? 1 : 0);
