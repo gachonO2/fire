@@ -2243,9 +2243,9 @@ function drawTower() {
     const can = f.planId && !f.active ? '1' : '0';
     rows.push(`<button class="floor ${f.active ? 'on' : ''}" data-state="${state}"
       data-can="${can}" data-plan="${f.planId || ''}" ${can === '1' ? '' : 'disabled'}
-      title="${f.floor}층 · ${s.label} — ${s.hint}${f.name ? `\n${f.name}` : ''}"
-      aria-label="${f.floor}층 ${s.label}${can === '1' ? ', 누르면 이 층을 봅니다' : ''}">
-      <span class="n">${f.floor}층</span>
+      title="${f.label || `${f.floor}층`} · ${s.label} — ${s.hint}${f.name ? `\n${f.name}` : ''}"
+      aria-label="${f.label || `${f.floor}층`} ${s.label}${can === '1' ? ', 누르면 이 층을 봅니다' : ''}">
+      <span class="n">${f.label || `${f.floor}층`}</span>
       <span class="st">${s.label}</span>
     </button>`);
   }
@@ -2272,7 +2272,7 @@ function drawTower() {
       lv.push(`<div class="lv ${f.active ? 'on' : ''}" data-state="${state}"
         data-can="${can}" data-plan="${f.planId || ''}"
         style="--z:${(f.floor - 1) * GAP}px"
-        aria-label="${f.floor}층 ${FLOOR_STATE[state].label}"></div>`);
+        aria-label="${f.label || `${f.floor}층`} ${FLOOR_STATE[state].label}"></div>`);
     }
     model.innerHTML = lv.join('');
     model.querySelectorAll('[data-can="1"]').forEach(el => {

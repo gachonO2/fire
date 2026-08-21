@@ -33,8 +33,17 @@ import { getRepo } from './repositories/index.js';
  */
 export const BUILDING = Object.freeze({
   name: 'AI공학관',
-  floors: 7,
-  rooftop: true,
+  /**
+   * 지상 8개 층 — 1~7층과 옥탑(PH). **지하는 없다.**
+   *
+   * 옥탑을 별도 칸이 아니라 8층으로 세는 이유: 옥탑에도 도면이 있고
+   * 계단이 이어지고 감지기가 붙는다. «층이 아닌 무엇» 으로 빼 두면
+   * 그 층만 판정에서 빠져, 옥탑에 불이 나도 화면이 조용하다.
+   */
+  floors: 8,
+  /** 8층의 표시 이름. 「8층」 보다 「옥탑」 이 현장에서 쓰는 말이다. */
+  topLabel: '옥탑',
+  rooftop: false,
 });
 
 /** 도면 이름에서 층을 읽는다. 못 읽으면 null — 추측해서 붙이지 않는다. */
@@ -101,7 +110,10 @@ export async function buildingFloors() {
       detectors: hasDetectors
         ? HEAT_SPOTS.length : 0,
       state: !p ? 'none' : hasDetectors ? 'watched' : 'plan-only',
+      label: f === BUILDING.floors && BUILDING.topLabel
+        ? BUILDING.topLabel : `${f}층`,
     });
   }
-  return { name: BUILDING.name, floors: out, rooftop: BUILDING.rooftop, activeId };
+  return { name: BUILDING.name, floors: out, rooftop: BUILDING.rooftop,
+    topLabel: BUILDING.topLabel, activeId };
 }
