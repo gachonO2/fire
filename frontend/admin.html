@@ -62,8 +62,10 @@
       /* 비콘은 **보라**다. 예전에는 --ok 와 같은 민트였는데, 출구도 민트라서
          지도에서 «저 초록 점이 출구인가 비콘인가» 가 안 갈렸다. 색이 뜻을
          하나씩만 맡아야 흘깃 봐도 읽힌다. */
-      --beacon:      #b06bff;
-      --beacon-soft: rgba(176,107,255,.14);
+      /* 비콘 — 블루투스의 파랑. 기호가 이미 «무선» 을 말하고 있으므로
+         색도 그 기호의 색이어야 한다. */
+      --beacon:      #2f8fd6;
+      --beacon-soft: rgba(47,143,214,.14);
 
       /* 층을 이루는 색 — 바닥판·벽면·벽 윗면 */
       --slab:        #33383f;
@@ -478,6 +480,11 @@
       height: 132px; margin: 0;
       perspective: 900px; perspective-origin: 50% 46%;
     }
+    /* **쌓인 판은 위로 자란다.**
+       `translateZ` 를 위로 주므로 층이 늘수록 위쪽으로 뻗고, 그러면 카드
+       윗변에 잘린다. 아래는 텅 비어 있는데 위만 모자란 꼴이다.
+       상자 안에서 통째로 아래로 밀어 그 빈자리를 쓴다. */
+    .tower-in { margin-top: 40px; }
     .tower-in {
       position: relative; width: 100%; height: 100%;
       transform-style: preserve-3d;

@@ -22,7 +22,7 @@
  * 이 그림 자체가 «도면을 올리면 그 층이 켜진다» 를 말해 준다.
  */
 
-import { HEAT_SPOTS } from './heatSensors.js';
+import { detectorSpots } from './heatSensors.js';
 import { getRepo } from './repositories/index.js';
 
 /**
@@ -95,20 +95,22 @@ export async function buildingFloors() {
   const out = [];
   for (let f = BUILDING.floors; f >= 1; f--) {
     const p = best.get(f) || null;
-    let hasDetectors = false;
+    // 감지기는 **그 층 도면의 분기점·출구에** 붙는다. 6층 지점 id 를 찾던
+    // 예전 방식은 다른 층에서 한 대도 못 찾아, 감지기가 6층에만 있는 것처럼
+    // 보이게 만들었다.
+    let mounted = 0;
     if (p) {
       const full = await repo.getPlan(p.id).catch(() => null);
-      const ids = new Set((full?.nodes || []).map(n => n.id));
-      hasDetectors = HEAT_SPOTS.some(s => ids.has(s.nodeId));
+      mounted = detectorSpots(full).length;
     }
+    const hasDetectors = mounted > 0;
     out.push({
       floor: f,
       planId: p?.id ?? null,
       name: p?.name ?? null,
       nodes: p?.nodeCount ?? 0,
       active: p?.id === activeId,
-      detectors: hasDetectors
-        ? HEAT_SPOTS.length : 0,
+      detectors: mounted,
       state: !p ? 'none' : hasDetectors ? 'watched' : 'plan-only',
       label: f === BUILDING.floors && BUILDING.topLabel
         ? BUILDING.topLabel : `${f}층`,

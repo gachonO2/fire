@@ -67,29 +67,70 @@ import { getRepo } from './repositories/index.js';
  * 도면에 없는 지점은 조용히 건너뛴다. 다른 건물 도면을 올렸을 때 서버가
  * 죽으면 안 되고, 그 도면에는 그 도면의 분기점이 있을 것이다.
  */
-export const HEAT_SPOTS = [
-  // 회선 주소(L1-xx)는 R형 수신기가 기기를 부르는 이름이다. 실제 설비에서
-  // 「3층 L1-14 화재」 처럼 부르므로, 화면과 무전이 같은 이름을 써야 한다.
+/**
+ * 감지기를 달 자리 — **국내 기준의 간격을 지킨다.**
+ *
+ * ## 왜 분기점마다 달면 안 되나
+ *
+ * 처음에는 복도 분기점 전부에 달았다. 그랬더니 기준층 하나에 **52대**가
+ * 붙었다. 도면의 «분기점» 은 우리가 경로를 풀려고 13m 마다 찍어 둔 점이지
+ * 감지기를 달 자리가 아니다. 화면이 감지기로 뒤덮이는 것도 문제지만,
+ * 더 나쁜 것은 **그 숫자가 실제 건물과 다르다**는 것이다. 시연에서
+ * 「저 건물에 감지기가 저렇게 많나요」 를 물으면 답할 말이 없다.
+ *
+ * ## 기준 (NFTC 203)
+ *
+ *   복도 연기감지기   **보행거리 30m 마다 1개** (3종은 20m)
+ *   계단·엘리베이터   수직 통로는 별도로 반드시 단다
+ *
+ * 130m 짜리 복도면 다섯 대다. 쉰두 대가 아니라.
+ *
+ * ## 그래서 이렇게 고른다
+ *
+ *   ① 계단·비상구·엘리베이터 앞은 **무조건** — 수직 통로이고 사람이 모인다
+ *   ② 복도 분기점은 **30m 간격으로 솎아서** — 앞에 고른 것에서 그만큼
+ *      떨어진 것만 남긴다
+ *
+ * 간격은 도면의 축척(`metersPerUnit`)으로 잰다. 픽셀로 재면 도면 크기가
+ * 다른 건물에서 간격이 통째로 달라진다.
+ */
+
+/** 복도 감지기 간격(m). NFTC 203 의 보행거리 30m. */
+export const CORRIDOR_SPACING_M = 30;
+
+export function detectorSpots(plan) {
+  const nodes = plan?.nodes || [];
+  if (!nodes.length) return [];
+  const mpu = Number(plan.metersPerUnit) > 0 ? Number(plan.metersPerUnit) : 0.1;
+  const far = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) * mpu;
+
+  // ① 수직 통로는 무조건. 계단실은 연기가 굴뚝처럼 오르는 곳이고,
+  //    엘리베이터 승강로도 마찬가지다.
+  const must = nodes.filter(n => n.type === 'exit' || n.type === 'elevator');
+
+  // ② 복도는 30m 간격으로 솎는다. 이미 고른 것과 가까우면 건너뛴다.
+  const picked = [...must];
+  for (const n of nodes) {
+    if (n.type !== 'junction') continue;
+    if (picked.every(m => far(n, m) >= CORRIDOR_SPACING_M)) picked.push(n);
+  }
+
+  // 한 자리에 연기와 열을 같이 단다(교차회로). 연기는 빨리 울지만 수증기·
+  // 먼지에 잘 속고, 열은 느리지만 거의 안 속는다 — 둘이 같이 울면 확실하다.
   //
-  // **한 자리에 연기와 열을 같이 단다.** 연기는 빨리 울지만 수증기·먼지에
-  // 잘 속고, 열은 느리지만 거의 안 속는다. 둘이 같이 울면 확실하다 —
-  // 실제 설비에서 교차회로(cross-zoning)라고 부르는 구성이 이것이다.
-  { nodeId: 'J_NS3', label: 'NORTH STREET 서쪽' },
-  { nodeId: 'J_NS4', label: 'NORTH STREET 동쪽' },
-  { nodeId: 'J_ALLEY', label: 'LOCKER ALLEYWAY' },
-  { nodeId: 'J_SS1', label: 'SOUTH STREET 서쪽' },
-  { nodeId: 'J_SS2', label: 'SOUTH STREET 동쪽' },
-  { nodeId: 'ELEWAY', label: '엘리베이터 앞' },
-  { nodeId: 'EXIT_POINT', label: '비상구 (THE POINT)' },
-  { nodeId: 'EXIT_SEMINAR', label: '비상구 (THE SEMINAR)' },
-  { nodeId: 'EXIT_CW', label: '비상구 (CREATIVE WORKSPACE)' },
-  { nodeId: 'R_OPENOFFICE', label: 'OPEN OFFICE' },
-].flatMap((spot, i) => [
-  { id: `SIM-SMOKE-${spot.nodeId}`, kind: DETECTOR.SMOKE,
-    address: `L1-${String(i * 2 + 1).padStart(3, '0')}`, ...spot },
-  { id: `SIM-HEAT-${spot.nodeId}`, kind: DETECTOR.HEAT,
-    address: `L1-${String(i * 2 + 2).padStart(3, '0')}`, ...spot },
-]);
+  // 주소는 **도면 순서**로 매긴다. 고른 순서(출구 먼저)로 매기면 도면을
+  // 다시 읽을 때마다 같은 기기의 주소가 바뀌어, 무전으로 부르던 이름이
+  // 어제와 달라진다.
+  const order = new Map(nodes.map((n, i) => [n.id, i]));
+  picked.sort((a, b) => order.get(a.id) - order.get(b.id));
+
+  return picked.flatMap((n, i) => [
+    { id: `SIM-SMOKE-${n.id}`, kind: DETECTOR.SMOKE, nodeId: n.id, label: n.name || n.id,
+      address: `L1-${String(i * 2 + 1).padStart(3, '0')}` },
+    { id: `SIM-HEAT-${n.id}`, kind: DETECTOR.HEAT, nodeId: n.id, label: n.name || n.id,
+      address: `L1-${String(i * 2 + 2).padStart(3, '0')}` },
+  ]);
+}
 
 /** 평상시 실내 온도(℃) */
 const BASE_C = 23;
@@ -223,7 +264,7 @@ function distToSegment(p, seg) {
 export async function mountedSensors() {
   const plan = await activeFloorPlan();
   if (!plan) return [];
-  return HEAT_SPOTS
+  return detectorSpots(plan)
     .map(s => ({ ...s, node: plan.getNode?.(s.nodeId) }))
     .filter(s => s.node && Number.isFinite(s.node.x));
 }

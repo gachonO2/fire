@@ -53,6 +53,18 @@ function hasRealBeacons() {
   const nodes = api.floorPlan?.nodes || [];
   return nodes.some(n => n.beaconId && !String(n.beaconId).startsWith('SIM'));
 }
+
+/**
+ * 도면에 비콘이 **등록돼 있는가** — 실물이든 시뮬레이션이든.
+ *
+ * `hasRealBeacons` 와 나누는 이유: 그릴지 말지와, 실물이라고 말할지는
+ * 다른 판단이다. 시뮬레이션 비콘도 지도에 나와야 «어디에 달 것인가» 를
+ * 볼 수 있는데, 예전에는 안 그려서 배치해 놓고도 화면이 비어 있었다.
+ * 대신 옅은 점선과 범례 글씨가 **실물이 아니라는 것**을 말한다.
+ */
+function hasAnyBeacons() {
+  return (api.floorPlan?.nodes || []).some(n => n.beaconId);
+}
 let selectedUser = null;
 let query = '';
 
@@ -128,7 +140,7 @@ async function main() {
   // 파동 애니메이션은 **실물 비콘을 단 도면에서만** 쓴다. 답사로 알아낸 곳은
   // 정지한 표식으로 그린다 — 답사 지점은 «지금 울리고 있다» 가 아니라
   // «여기서 신호를 받아 뒀다» 라서, 움직이면 뜻이 달라진다.
-  if (hasRealBeacons()) {
+  if (hasAnyBeacons()) {
     startBeaconWaves(document.getElementById('beacon-waves'), () => ({
       baseSvg: document.getElementById('admin-map'),
       floorPlan: api.floorPlan,
@@ -269,9 +281,12 @@ function draw() {
   // 거기 붙인 좌표는 **가짜 출발점에서 밀어낸 걸음 추정치**라 위치가 틀렸다.
   // 틀린 좌표의 비콘을 지도에 찍으면 그 다음부터 아무도 지도를 못 믿는다.
   // 사람이 그 자리에 서서 태그한 것만 그린다.
-  if (api.floorPlan && isOn('show-beacons') && hasRealBeacons()) {
+  if (api.floorPlan && isOn('show-beacons') && hasAnyBeacons()) {
     drawBeacons(document.getElementById('admin-map'), api.floorPlan, {
       showRange: isOn('show-range', false),
+      // 세기는 **받는 사람** 이 있어야 나온다. 파동 애니메이션과 같은 목록을
+      // 넘겨야 커진 기호와 센 파동이 같은 자리에서 만난다.
+      near: livePositions().filter(p => Number.isFinite(p?.x)),
     });
   }
   drawSurvey();
@@ -1849,9 +1864,10 @@ function updateBeaconChrome() {
   // 보이게 두는 편이 낫다.
   const wave = document.getElementById('show-waves');
   if (wave) {
-    wave.disabled = !real;
-    wave.style.opacity = real ? '' : '.35';
-    wave.title = real
+    const any2 = hasAnyBeacons();
+    wave.disabled = !any2;
+    wave.style.opacity = any2 ? '' : '.35';
+    wave.title = any2
       ? '전파 — 비콘에서 퍼지는 파동 (사람이 가까이 있을 때)'
       : '전파 애니메이션은 도면에 실물 비콘 id 가 등록돼야 돕니다'
         + ' — 지금은 답사로 태그한 지점과 경로 가상 비콘뿐입니다';
@@ -1863,8 +1879,13 @@ function updateBeaconChrome() {
   if (note) {
     note.hidden = false;
     const thin = [...surveyedSpots.values()].filter(n => n <= 2).length;
-    note.textContent = surveyedSpots.size === 0 && routeCount === 0
-      ? '비콘 없음 — 답사 전'
+    const sim = (api.floorPlan?.nodes || [])
+      .filter(n => String(n.beaconId || '').startsWith('SIM')).length;
+    note.textContent = sim
+      ? `비콘 ${sim}개 (시뮬레이션 · 실물 아님)`
+        + (surveyedSpots.size ? ` · 답사 ${surveyedCount}신호` : '')
+      : surveyedSpots.size === 0 && routeCount === 0
+        ? '비콘 없음 — 답사 전'
       : (surveyedSpots.size ? `기존 비콘 ${surveyedCount}개 · ${surveyedSpots.size}지점` : '')
         + (routeCount ? `${surveyedSpots.size ? ' · ' : ''}경로 가상 ${routeCount}개` : '')
         + (isPhotoScenarioActive() ? ' · RSSI 시뮬레이션' : '')
@@ -2067,7 +2088,10 @@ function wireOrbit() {
   stage.addEventListener('wheel', e => {
     e.preventDefault();
     const cur = parseFloat(getComputedStyle(inner).getPropertyValue('--zoom')) || 1;
-    setZoomValue(clamp(cur * (e.deltaY > 0 ? 0.92 : 1.08), 1, 6));
+    // **1배 아래로도 줄인다.** 발표 자료에 넣으려면 건물 전체가 한 화면에
+    // 들어와야 하는데, 하한이 1배(= 화면 맞춤)라 그보다 작게 못 만들었다.
+    // 0.4배까지 열어 두면 여백을 두고 담을 수 있다.
+    setZoomValue(clamp(cur * (e.deltaY > 0 ? 0.92 : 1.08), 0.4, 6));
   }, { passive: false });
 }
 
@@ -2124,7 +2148,8 @@ function wireChrome() {
   const inner = document.getElementById('stage-inner');
   const curZoom = () => parseFloat(getComputedStyle(inner).getPropertyValue('--zoom')) || 1;
   document.getElementById('zoom-in')?.addEventListener('click', () => setZoomValue(Math.min(4, curZoom() * 1.25)));
-  document.getElementById('zoom-out')?.addEventListener('click', () => setZoomValue(Math.max(1, curZoom() / 1.25)));
+  // 하한 0.4 — 발표 자료에 담으려면 «화면 맞춤» 보다 더 작게 줄일 수 있어야 한다
+  document.getElementById('zoom-out')?.addEventListener('click', () => setZoomValue(Math.max(0.4, curZoom() / 1.25)));
   document.getElementById('btn-fit')?.addEventListener('click', () => {
     // 시점 초기화 — 돌리다 길을 잃었을 때 돌아올 자리가 있어야 마음 놓고 돌린다
     inner.classList.add('animate');
