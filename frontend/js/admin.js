@@ -2233,7 +2233,7 @@ function drawTower() {
 
   const rows = building.rooftop
     ? [`<div class="floor" data-state="none">
-         <span class="n rooftop">옥상</span><i class="slabline"></i>
+         <span class="n rooftop">옥상</span>
          <span class="st rooftop">도면 없음</span></div>`]
     : [];
 
@@ -2246,7 +2246,6 @@ function drawTower() {
       title="${f.floor}층 · ${s.label} — ${s.hint}${f.name ? `\n${f.name}` : ''}"
       aria-label="${f.floor}층 ${s.label}${can === '1' ? ', 누르면 이 층을 봅니다' : ''}">
       <span class="n">${f.floor}층</span>
-      <i class="slabline"></i>
       <span class="st">${s.label}</span>
     </button>`);
   }
@@ -2266,10 +2265,14 @@ function drawTower() {
     for (const f of building.floors) {
       const state = f.active && burning ? 'fire' : f.state;
       const can = f.planId && !f.active ? '1' : '0';
+      // **`title` 을 안 붙인다.** 브라우저 기본 툴팁이 모형 위에 떠서 다른
+      // 층을 가린다 — 모형은 «어느 층인지 가리키는» 물건인데 그 위에 글상자가
+      // 뜨면 정작 가리키는 것을 못 본다. 층 이름과 상태는 바로 옆 목록이
+      // 이미 적고 있고, 스크린리더에는 `aria-label` 로 간다.
       lv.push(`<div class="lv ${f.active ? 'on' : ''}" data-state="${state}"
         data-can="${can}" data-plan="${f.planId || ''}"
         style="--z:${(f.floor - 1) * GAP}px"
-        title="${f.floor}층 · ${FLOOR_STATE[state].label}"></div>`);
+        aria-label="${f.floor}층 ${FLOOR_STATE[state].label}"></div>`);
     }
     model.innerHTML = lv.join('');
     model.querySelectorAll('[data-can="1"]').forEach(el => {
