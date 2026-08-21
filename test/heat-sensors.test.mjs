@@ -8,7 +8,7 @@
  */
 
 import { strict as assert } from 'node:assert';
-import { heatAt, HEAT_SPOTS } from '../backend/src/heatSensors.js';
+import { detectorSpots, heatAt } from '../backend/src/heatSensors.js';
 import { TEMP, temperatureHazard } from '../shared/hazard-rules.js';
 
 const tests = [];
@@ -109,34 +109,60 @@ test('긴 복도가 타면 그 복도의 감지기가 운다', () => {
   assert.ok(c >= TEMP.BLOCK, `복도 끝 감지기가 ${c}℃ 밖에 안 됐다`);
 });
 
-test('감지기는 분기점·승강기·비상구에 단다', () => {
-  // 방 안에만 달면 그 방만 못 쓰게 되고 경로는 그대로다. 분기점과 비상구는
-  // 경로가 갈리거나 사람이 모이는 곳이라 «여기가 막히면 저쪽으로» 가 성립한다.
-  const ids = HEAT_SPOTS.map(s => s.nodeId);
-  const spots = [...new Set(ids)];
-  const ok = spots.filter(id =>
-    id.startsWith('J_') || id.startsWith('EXIT_') || id === 'ELEWAY');
-  assert.ok(ok.length >= spots.length - 1,
-    `방에 달린 감지기가 너무 많다: ${spots.join(', ')}`);
-  assert.ok(HEAT_SPOTS.every(s => s.id.startsWith('SIM-')),
-    '시뮬레이션 감지기는 SIM- 으로 표시해야 실물과 구분된다');
-});
+/** 기준층을 흉내낸 작은 도면 — 분기점 둘, 출구 하나, 엘리베이터 하나, 방 둘 */
+const PLAN = {
+  nodes: [
+    { id: 'J1', type: 'junction', name: '복도 1', x: 100, y: 100 },
+    { id: 'J2', type: 'junction', name: '복도 2', x: 200, y: 100 },
+    { id: 'E1', type: 'exit', name: '계단', x: 300, y: 100 },
+    { id: 'EV', type: 'elevator', name: '엘리베이터', x: 250, y: 60 },
+    { id: 'R1', type: 'room', name: '501호', x: 100, y: 180 },
+    { id: 'R2', type: 'room', name: '502호', x: 200, y: 180 },
+  ],
+};
 
-test('감지기 id 와 회선 주소가 겹치지 않는다', () => {
-  // 주소가 겹치면 수신기가 두 기기를 한 기기로 보고, 하나가 울어도
-  // 다른 하나의 값으로 덮인다.
-  assert.equal(new Set(HEAT_SPOTS.map(s => s.id)).size, HEAT_SPOTS.length);
-  assert.equal(new Set(HEAT_SPOTS.map(s => s.address)).size, HEAT_SPOTS.length);
+test('감지기는 분기점·비상구·엘리베이터 앞에 단다', () => {
+  // 방 안에만 달면 그 방 하나만 못 쓰게 되고 경로는 그대로다. 분기점이라야
+  // «여기가 막히면 저쪽으로» 가 성립한다.
+  const spots = detectorSpots(PLAN);
+  const nodes = [...new Set(spots.map(s => s.nodeId))].sort();
+  assert.deepEqual(nodes, ['E1', 'EV', 'J1', 'J2']);
+  assert.ok(!nodes.includes('R1'), '방에 달았다');
 });
 
 test('한 자리에 연기와 열을 같이 단다', () => {
   // 연기는 빨리 울지만 수증기·먼지에 잘 속고, 열은 느리지만 거의 안 속는다.
   // 둘이 같이 울면 확실하다 — 실제 설비의 교차회로 구성이다.
-  const spots = [...new Set(HEAT_SPOTS.map(s => s.nodeId))];
-  for (const n of spots) {
-    const kinds = HEAT_SPOTS.filter(s => s.nodeId === n).map(s => s.kind).sort();
+  const spots = detectorSpots(PLAN);
+  for (const n of [...new Set(spots.map(s => s.nodeId))]) {
+    const kinds = spots.filter(s => s.nodeId === n).map(s => s.kind).sort();
     assert.deepEqual(kinds, ['heat', 'smoke'], `${n} 에 한 종류만 있다`);
   }
+});
+
+test('회선 주소가 겹치지 않는다', () => {
+  // 주소가 겹치면 수신기가 두 기기를 한 기기로 보고, 하나가 울어도
+  // 다른 하나의 값으로 덮인다.
+  const spots = detectorSpots(PLAN);
+  assert.equal(new Set(spots.map(s => s.address)).size, spots.length);
+  assert.equal(new Set(spots.map(s => s.id)).size, spots.length);
+  assert.ok(spots.every(s => s.id.startsWith('SIM-')),
+    '시뮬레이션 감지기는 SIM- 으로 표시해야 실물과 구분된다');
+});
+
+test('**어느 층 도면이든** 감지기가 붙는다', () => {
+  // 예전에는 6층 지점 id 를 박아 뒀다. 그래서 다른 층을 열면 한 대도 안
+  // 붙었고, 감지기가 6층에만 있는 것처럼 보였다.
+  const other = { nodes: [
+    { id: 'N0', type: 'junction', name: '북쪽 복도 1', x: 10, y: 10 },
+    { id: 'EXIT_E', type: 'exit', name: '동쪽 계단', x: 90, y: 10 },
+  ] };
+  assert.equal(detectorSpots(other).length, 4);   // 두 자리 × 두 종류
+});
+
+test('도면이 없으면 감지기도 없다', () => {
+  assert.equal(detectorSpots(null).length, 0);
+  assert.equal(detectorSpots({ nodes: [] }).length, 0);
 });
 
 let pass = 0;

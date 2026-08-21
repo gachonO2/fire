@@ -67,29 +67,41 @@ import { getRepo } from './repositories/index.js';
  * 도면에 없는 지점은 조용히 건너뛴다. 다른 건물 도면을 올렸을 때 서버가
  * 죽으면 안 되고, 그 도면에는 그 도면의 분기점이 있을 것이다.
  */
-export const HEAT_SPOTS = [
-  // 회선 주소(L1-xx)는 R형 수신기가 기기를 부르는 이름이다. 실제 설비에서
-  // 「3층 L1-14 화재」 처럼 부르므로, 화면과 무전이 같은 이름을 써야 한다.
-  //
-  // **한 자리에 연기와 열을 같이 단다.** 연기는 빨리 울지만 수증기·먼지에
-  // 잘 속고, 열은 느리지만 거의 안 속는다. 둘이 같이 울면 확실하다 —
-  // 실제 설비에서 교차회로(cross-zoning)라고 부르는 구성이 이것이다.
-  { nodeId: 'J_NS3', label: 'NORTH STREET 서쪽' },
-  { nodeId: 'J_NS4', label: 'NORTH STREET 동쪽' },
-  { nodeId: 'J_ALLEY', label: 'LOCKER ALLEYWAY' },
-  { nodeId: 'J_SS1', label: 'SOUTH STREET 서쪽' },
-  { nodeId: 'J_SS2', label: 'SOUTH STREET 동쪽' },
-  { nodeId: 'ELEWAY', label: '엘리베이터 앞' },
-  { nodeId: 'EXIT_POINT', label: '비상구 (THE POINT)' },
-  { nodeId: 'EXIT_SEMINAR', label: '비상구 (THE SEMINAR)' },
-  { nodeId: 'EXIT_CW', label: '비상구 (CREATIVE WORKSPACE)' },
-  { nodeId: 'R_OPENOFFICE', label: 'OPEN OFFICE' },
-].flatMap((spot, i) => [
-  { id: `SIM-SMOKE-${spot.nodeId}`, kind: DETECTOR.SMOKE,
-    address: `L1-${String(i * 2 + 1).padStart(3, '0')}`, ...spot },
-  { id: `SIM-HEAT-${spot.nodeId}`, kind: DETECTOR.HEAT,
-    address: `L1-${String(i * 2 + 2).padStart(3, '0')}`, ...spot },
-]);
+/**
+ * 감지기를 달 자리 — **지점 id 가 아니라 «어떤 자리인가» 로 정한다.**
+ *
+ * 처음에는 6층 지점 id(`J_SS2` 등)를 그대로 박아 뒀다. 그랬더니 다른 층
+ * 도면을 열면 그 id 가 없어서 감지기가 한 대도 안 붙었고, 층 스택이 6층만
+ * 「감시 중」 이고 나머지는 전부 「도면만」 이었다. **감지기는 층마다 다는
+ * 것인데 6층에만 있는 것처럼 보였다.**
+ *
+ * 실제 설비도 «J_SS2 에 단다» 가 아니라 «복도 분기점과 계단 앞에 단다» 로
+ * 정한다. 그 규칙을 그대로 옮긴다 — 도면이 바뀌면 그 도면의 분기점·출구·
+ * 엘리베이터 앞에 붙는다.
+ *
+ * ## 왜 이 세 자리인가
+ *
+ *   분기점       경로가 갈리는 곳. «여기가 막히면 저쪽으로» 가 성립한다
+ *   비상구·계단   사람이 모이는 곳. 실제 건물에서도 반드시 붙는다
+ *   엘리베이터 앞  승강로가 연기를 빨아올린다
+ *
+ * 방 안에만 달면 그 방 하나만 못 쓰게 되고 경로는 그대로다.
+ */
+export function detectorSpots(plan) {
+  const wanted = (plan?.nodes || []).filter(n =>
+    n.type === 'junction' || n.type === 'exit' || n.type === 'elevator');
+
+  // 한 자리에 연기와 열을 같이 단다(교차회로). 연기는 빨리 울지만 수증기·
+  // 먼지에 잘 속고, 열은 느리지만 거의 안 속는다 — 둘이 같이 울면 확실하다.
+  return wanted.flatMap((n, i) => [
+    { id: `SIM-SMOKE-${n.id}`, kind: DETECTOR.SMOKE, nodeId: n.id, label: n.name || n.id,
+      address: `L1-${String(i * 2 + 1).padStart(3, '0')}` },
+    { id: `SIM-HEAT-${n.id}`, kind: DETECTOR.HEAT, nodeId: n.id, label: n.name || n.id,
+      address: `L1-${String(i * 2 + 2).padStart(3, '0')}` },
+  ]);
+}
+
+
 
 /** 평상시 실내 온도(℃) */
 const BASE_C = 23;
@@ -223,7 +235,7 @@ function distToSegment(p, seg) {
 export async function mountedSensors() {
   const plan = await activeFloorPlan();
   if (!plan) return [];
-  return HEAT_SPOTS
+  return detectorSpots(plan)
     .map(s => ({ ...s, node: plan.getNode?.(s.nodeId) }))
     .filter(s => s.node && Number.isFinite(s.node.x));
 }
