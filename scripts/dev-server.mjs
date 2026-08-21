@@ -178,8 +178,11 @@ async function serveStatic(req, res, pathname) {
     ? path.join(SHARED, pathname.slice('/shared/'.length))
     : path.join(FRONTEND, pathname === '/' ? 'index.html' : pathname);
 
-  // 디렉터리 밖 접근 차단
-  if (!file.startsWith(FRONTEND) && !file.startsWith(SHARED)) {
+  // 디렉터리 밖 접근 차단.
+  // 구분자까지 함께 본다 — startsWith 만 쓰면 frontend 옆의 frontend-secret 같은
+  // 형제 디렉터리가 접두사 검사를 통과한다.
+  const inside = dir => file === dir || file.startsWith(dir + path.sep);
+  if (!inside(FRONTEND) && !inside(SHARED)) {
     res.writeHead(403).end('Forbidden');
     return;
   }
