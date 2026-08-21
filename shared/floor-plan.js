@@ -179,12 +179,21 @@ export function validatePlan(plan) {
 }
 
 /**
- * 출구에 도달할 수 없는 노드를 찾는다 (위험 없는 평상시 기준).
+ * 출구에 도달할 수 없는 노드를 찾는다.
  * 도면을 잘못 그려 통로가 끊긴 곳을 편집기에서 미리 잡아내기 위한 점검이다.
+ *
+ * **엘리베이터 구간은 빼고 따진다.** 경로탐색은 화재 모드에서 언제나 엘리베이터를
+ * 제외하므로(pathfinding.js 의 buildGraph), 엘리베이터로만 닿는 방은 실제 대피
+ * 상황에서 갈 곳이 없다. 그걸 세면서 "이어져 있다"고 하면, 정작 안내가 필요한
+ * 순간에 경로가 없는 방을 도면 검증이 통과시킨 셈이 된다.
+ *
+ * 엘리베이터 노드 자신은 결과에서 뺀다 — 화재 시 거기서 출발할 일이 없고
+ * (앱의 시작 위치 목록도 제외한다), 매번 경고로 뜨면 진짜 문제가 묻힌다.
  */
 export function findUnreachableNodes(floorPlan) {
   const adj = new Map(floorPlan.nodes.map(n => [n.id, []]));
   for (const e of floorPlan.edges) {
+    if (e.elevator) continue;
     adj.get(e.a)?.push(e.b);
     adj.get(e.b)?.push(e.a);
   }
@@ -196,5 +205,7 @@ export function findUnreachableNodes(floorPlan) {
       if (!seen.has(next)) { seen.add(next); queue.push(next); }
     }
   }
-  return floorPlan.nodes.filter(n => !seen.has(n.id)).map(n => n.id);
+  return floorPlan.nodes
+    .filter(n => n.type !== 'elevator' && !seen.has(n.id))
+    .map(n => n.id);
 }
