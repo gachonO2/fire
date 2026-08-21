@@ -1,0 +1,11 @@
+flowchart TB
+  SCAN["BLE 스캔<br/>{beaconId, rssi, ts}[]"] --> SM["이동평균 3초<br/>(±10dB 요동 평활)"]
+  SM --> CMP["최근접 후보 선정<br/>(비교만, 거리 환산 없음)"]
+  CMP --> HYS{"기존보다 +5dB<br/>2초 지속?"}
+  HYS -- "아니오" --> KEEP["현재 노드 유지"]
+  HYS -- "예" --> ADJ{"그래프 인접?"}
+  ADJ -- "예" --> SWITCH["노드 전환 확정"]
+  ADJ -- "아니오" --> HOLD["유지시간 ×2 요구<br/>(반사 허상 억제)"]
+  HOLD --> SWITCH
+  SWITCH --> OUT["onLocate 발화<br/>(최초 확정 포함)"]
+  DEAD["신호 전멸"] -.-> LAST["마지막 위치 유지"]

@@ -1,0 +1,12 @@
+flowchart TB
+  subgraph HOST["Firebase Hosting"]
+    ST["frontend/ 정적 파일<br/>(+ frontend/shared 사본 — npm run sync)"]
+  end
+  subgraph RUN["Cloud Run"]
+    BE["backend 컨테이너 (Express :8080)"]
+  end
+  U["브라우저 (PWA)"] -- "https" --> HOST
+  HOST -- "firebase.json rewrite /api/** → Cloud Run" --> RUN
+  RUN -- "Admin SDK" --> FS[("Firestore")]
+  RUN -- "DETECTOR_URL" --> ML["탐지기 (선택 배치)"]
+  RUN -- "API 키" --> LLM["Gemini / Claude"]

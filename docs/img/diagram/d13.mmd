@@ -1,0 +1,6 @@
+flowchart TB
+  R["routes/* (API 계층)"] --> I["Repo 인터페이스<br/>(repositories/)"]
+  I --> FSR["FirestoreRepo<br/>firebase-admin 서비스 계정"]
+  I --> MEM["MemoryRepo<br/>인메모리 (설정 없을 때)"]
+  FSR --> DB[("Firestore")]
+  MEM --> RAM[("프로세스 메모리")]

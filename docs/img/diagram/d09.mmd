@@ -1,0 +1,16 @@
+sequenceDiagram
+  actor V as 대피자
+  participant APP as 사용자 앱
+  participant BE as 백엔드
+  actor G as 보호자
+  participant GD as 보호자 화면
+  V->>APP: 보호자 등록 (이름·연락처)
+  APP->>BE: POST /api/guardians
+  BE-->>APP: 6자리 공유 코드 + 링크
+  V->>G: 코드/링크 전달
+  G->>GD: guardian.html 열기 (코드 입력)
+  GD->>BE: GET /api/guardian/:code
+  BE-->>GD: 대상자 현재 상태
+  GD->>BE: GET /api/stream?code=XXXXXX
+  Note over BE,GD: 코드 스코프 — 해당 대상자의 위치·SOS·알림만.<br/>다른 대피자·운영 지표는 전달하지 않는다
+  BE-->>GD: SSE: 상태 전이 시에만 알림 (걸음마다 울리지 않는다)

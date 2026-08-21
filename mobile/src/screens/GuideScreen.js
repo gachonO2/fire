@@ -34,18 +34,61 @@
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { Barometer, Magnetometer } from 'expo-sensors';
+
 import { BearingSensor, alignment, proximity, ALIGNED_DEG } from '../bearing';
+import { Tracking } from '../tracking';
+import { DESCENT_PHASE, StairDescent, floorOf } from '../stair-descent';
+import { WalkSim } from '../walk-sim';
+import { scanBeacons } from '../beaconLocator';
+import { withVirtualBeacons } from '../beaconSim';
+import PositionMap from './PositionMap';
 import { RouteFollower, routeHitsHazard } from '../route';
+import { routeToNearestExit } from '../pathfinding';
 import { Odometry } from '../odometry';
 import { NorthCalibrator } from '../calibrate';
 import { HapticCompass, cueStart, cueLocked } from '../haptics';
 import { beepDirection, chimeGood, chimeWrong, chimeLocked } from '../sound';
 import { say, stopSpeaking } from '../announce';
+import { deviceIdNow } from '../deviceId';
+import EmergencyTorch from '../EmergencyTorch';
 import { theme } from '../theme';
 
 const TICK_MS = 110;
 const STABILITY_FLOOR = 0.25;     // 자기장이 이보다 흔들리면 방향을 믿지 않는다
-const CONFIDENCE_FLOOR = 0.35;    // 걸음 확신도가 이보다 낮으면 안내 중단
+const CONFIDENCE_FLOOR = 0.35;    // 위치 확신도가 이보다 낮으면 안내 중단
+
+/**
+ * 확신도가 이 시간 **내리** 낮아야 안전상태로 넘어간다.
+ *
+ * 한 틱 떨어졌다고 바로 멈추면 안 된다. 갈림길에 들어서는 순간에는 정말로 잠깐
+ * 어느 쪽인지 모르고, 그건 정직한 하락이다. 시뮬레이션에서도 교차점마다 몇 걸음씩
+ * 떨어졌다가 회복됐다. 비콘 판정이 `holdMs` 를 두는 것과 같은 이유다.
+ */
+const LOW_CONF_MS = 3000;
+
+/** 비콘 스캔 주기 — 실제 BLE 광고 주기와 같은 규모 */
+const SCAN_MS = 500;
+
+/**
+ * 이보다 빨리 방위가 돌면 **제자리 회전**으로 보고 위치를 전진시키지 않는다.
+ *
+ * 가속도계는 몸을 트는 동작도 봉우리로 잡는다. 그대로 걸음으로 세면 서서 두리번거리기만
+ * 해도 지도의 점이 복도를 따라 나아가고, 방위까지 바뀌니 가상 보행자가 엉뚱한 복도로
+ * 꺾여 버린다.
+ *
+ * 모퉁이를 돌며 걷는 것과 겹치지 않게 넉넉히 잡았다. 조금 덜 세는 쪽이,
+ * 서 있는 사람을 움직였다고 하는 것보다 낫다 — 덜 센 것은 비콘이 곧 바로잡는다.
+ */
+const TURNING_DPS = 90;
+
+/**
+ * 경로에서 벗어난 것으로 보이는 상태가 이 시간 이어져야 재탐색한다.
+ *
+ * 갈림길을 지나는 순간에는 잠깐 옆 통로로 읽힐 수 있다. 그때마다 "경로를
+ * 벗어났습니다"를 말하면 안내가 소음이 된다. 확신도 문턱과 같은 이유의 지연이다.
+ */
+const OFF_ROUTE_MS = 4000;
 const HAZARD_POLL_MS = 3000;
 const SUMMARY_MS = 30000;
 
@@ -67,18 +110,59 @@ const WRONG_NAG_MS = 6000;
 /** 서버에서 건물 이름을 못 받았을 때 보여줄 값 */
 const FALLBACK_PLACE = 'AI 공학관 7층';
 
-export default function GuideScreen({ api, plan, route, startNode, onExit, onSafeHold }) {
+export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
+                                      startNode, scenario = null, onExit, onSafeHold }) {
   const [err, setErr] = useState(null);
   const [align, setAlign] = useState(0);
   const [blocked, setBlocked] = useState(false);   // 방향을 믿을 수 없는 상태
+  // 지도는 **동행하는 사람과 만드는 사람**을 위한 것이다. 화살표 하나로는
+  // "위치가 맞게 잡히고 있나"를 확인할 수 없고, 확인이 안 되면 측위가 되는지 모른다.
+  const [showMap, setShowMap] = useState(true);
+  // **비상구에 닿는 것은 도착이 아니다.** 6층 계단참에 서 있는 것은 안전한
+  // 상태가 아니고(계단실은 연기가 굴뚝처럼 오른다), 진짜 대피는 건물 밖까지다.
+  // `arrived` 는 이제 «계단 앞에 닿았다» 를 뜻하고, 끝은 `descent.done` 이다.
   const [arrived, setArrived] = useState(false);
+  const [descentState, setDescentState] = useState(null);
+  const descent = useRef(null);
   const [stopped, setStopped] = useState(false);
   const [info, setInfo] = useState(null);
+  const [scenarioPosition, setScenarioPosition] = useState(null);
 
   const sensor = useRef(new BearingSensor()).current;
   const haptic = useRef(new HapticCompass()).current;
   const odo = useRef(new Odometry()).current;
-  const followerRef = useRef(new RouteFollower(plan, route));
+  // 기기마다 하나. 새로고침해도 안 바뀐다 — 바뀌면 관제에 유령이 하나씩 쌓인다.
+  const userId = useRef(deviceIdNow());
+  /** 기압계가 있나 — 없으면 층수를 세지 않고 그 사실을 말한다 */
+  const baroOk = useRef(true);
+  const followerOptions = wallSet => ({
+    walls: wallSet,
+    path: scenario?.route ?? null,
+    metersPerUnit: scenario?.metersPerUnit ?? null,
+  });
+  const followerRef = useRef(new RouteFollower(plan, route, followerOptions(wallsProp)));
+
+  // 판단 계층. 비콘·걸음·기압·지자기를 하나의 위치·확신도로 모은다(`src/tracking.js`).
+  // 경로 추종(RouteFollower)과 **일부러 분리**한다 — 경로 추종은 "걸었으니 갔겠지"로
+  // 미는 값이라, 합치면 경로에서 벗어난 것을 영영 알 수 없다.
+  const tracking = useRef(
+    new Tracking(withVirtualBeacons(plan), { startNodeId: startNode?.id })
+  ).current;
+  // 시뮬레이션에서 "실제로 서 있는 곳". 가상 비콘이 여기서 신호를 만든다.
+  //
+  // 예전에는 경로 위 위치를 썼는데, 그러면 어디로 걷든 가상 위치가 경로를 따라가서
+  // **경로 이탈을 재현할 수 없었다.** 이제 진짜 걸음과 진짜 나침반으로 움직이되
+  // 복도에 갇혀 있다 — 갈림길에서 딴 쪽으로 꺾으면 진짜로 그쪽으로 간다.
+  const walkSim = useRef(new WalkSim(withVirtualBeacons(plan), startNode?.id)).current;
+  const magUt = useRef(null);        // 마지막 자기장 크기 — 걸음마다 판단 계층에 넣는다
+  const offRouteSince = useRef(0);   // 경로를 벗어난 것으로 보이기 시작한 시각
+  const realBeacons = useRef(false); // 맥이 들은 진짜 신호를 한 번이라도 받았나
+  const headingMark = useRef(null);  // 회전 속도 판정용 (직전 방위·시각)
+  const [mapped, setMapped] = useState(0);   // 실제 전파로 자리를 알아낸 신호원 수
+  // 도면 사진 — 지도 배경. 한 번만 받아 둔다(수백 KB 라 매번 받으면 안 된다).
+  const [planImage, setPlanImage] = useState(null);
+  const [walls, setWalls] = useState(wallsProp);
+  const lowConfSince = useRef(0);    // 확신도가 낮아진 시각 (0 = 정상)
   const rotate = useRef(new Animated.Value(0)).current;
 
   const zone = useRef(null);
@@ -90,6 +174,7 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
   const lastSpoken = useRef('');
   const calib = useRef(new NorthCalibrator()).current;
   const lastWrongNag = useRef(0);
+  const scenarioFinished = useRef(false);
 
   const place = plan?.name?.trim() || FALLBACK_PLACE;
 
@@ -106,8 +191,34 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
     const known = followerRef.current.northOffset;
     if (known !== null) { calib.offset = known; calib.samples = 3; }
     noNorth.current = known === null;
+
+    // 도면 사진을 받아 지도 배경으로 깐다. 없어도 선으로는 그려지므로 조용히 넘어간다.
+    if (plan?.id && plan?.image?.width) {
+      api?.getPlanImage?.(plan.id)
+        .then(r => { if (alive && r?.dataUri) setPlanImage(r.dataUri); })
+        .catch(() => {});
+    }
+
+    // 벽을 받아 두면 통로를 그릴 때 **덜 뚫는 쪽으로** 꺾을 수 있다.
+    // 없어도 그려지므로(긴 축 먼저) 조용히 넘어간다.
+    if (plan?.id) {
+      api?.getPlanWalls?.(plan.id)
+        .then(w => {
+          if (!alive || !w?.walls?.length) return;
+          setWalls(w.walls);
+          // 아직 출발 전이면 경로도 다시 편다 — 그리는 쪽과 같은 꺾임을 써야 한다
+          followerRef.current?.setWalls?.(w.walls);
+          setInfo(followerRef.current.describe());
+        })
+        .catch(() => {});
+    }
+
     cueStart();
     setInfo(followerRef.current.describe());
+
+    // 시작 즉시 한 번, 이후 주기적으로 — 멈춰 서 있어도 관제에서 사라지지 않게
+    report('guiding');
+    const reportTimer = setInterval(() => report(), 2000);
 
     const d = followerRef.current.describe();
     speak(`대피 안내를 시작합니다. ${d.exitName}까지 ${fmt(d.totalMetersLeft)}미터. `
@@ -119,16 +230,149 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
     const timer = setInterval(() => alive && tick(), TICK_MS);
     const hazardTimer = setInterval(() => alive && checkHazards(), HAZARD_POLL_MS);
 
+    // 비콘을 **걷는 동안에도** 계속 확인한다. 예전에는 출발 지점을 잡을 때 한 번
+    // 스캔하고 끝이라, 걸음 오차가 쌓여도 바로잡을 길이 없었다.
+    //
+    // 두 갈래로 듣는다:
+    //   진짜  맥이 BLE 를 대신 듣고 서버가 판정한 것 (Expo Go 는 BLE 를 못 읽는다)
+    //   가상  맥이 없을 때를 위한 시뮬레이션
+    // **진짜가 들어오면 가상은 멈춘다.** 둘 다 넣으면 서로 다른 위치를 우겨 댄다.
+    const bp = withVirtualBeacons(plan);
+    const scanTimer = setInterval(async () => {
+      if (!alive) return;
+      const now = Date.now();
+
+      const got = await api?.getBeaconFix?.().catch(() => null);
+
+      // **진짜 수신기가 붙어 있으면 가상 비콘을 쓰지 않는다.**
+      //
+      // 둘을 같이 돌리면 순환이 된다: 가상 비콘이 폰 위치를 잡고 → 그 위치로 실제
+      // 신호를 매핑하고 → 그 매핑으로 위치를 잡는다. 자기가 만든 답을 자기가 다시
+      // 읽는 것이라, 걸어도 진짜가 되지 않는다.
+      //
+      // 그래서 스캐너가 붙은 순간부터 위치는 **걸음 + 실제 전파**로만 간다.
+      // 매핑이 쌓이기 전에는 걸음만으로 버티고, 쌓이면 전파가 이어받는다.
+      if (got?.scanner) {
+        if (!realBeacons.current) {
+          realBeacons.current = true;
+          speak('실제 비콘 수신기에 연결됐습니다. 걸으면 지도가 만들어집니다.');
+        }
+        setMapped(got.mapped ?? 0);
+        if (got.fix?.nodeId) tracking.pushRemoteFix(got.fix.nodeId);
+        return;
+      }
+      if (realBeacons.current) return;   // 진짜에 붙은 적이 있으면 가상으로 안 돌아간다
+
+      tracking.pushScans(scanBeacons(bp, now, walkSim.position()), now);
+    }, SCAN_MS);
+
+    // 기압계 — 층이 바뀌면 엘리베이터·계단 노드가 공짜 앵커가 된다
+    let baroSub = null;
+    Barometer.isAvailableAsync().then(ok => {
+      baroOk.current = !!ok;
+      if (!ok || !alive) return;
+      Barometer.setUpdateInterval(1000);
+      baroSub = Barometer.addListener(({ pressure }) => {
+        const change = tracking.pushPressure(pressure, Date.now());
+        if (!change) return;
+        // **계단을 내려가는 중이면 그쪽이 임자다.** 「몇 개 층 이동했습니다」
+        // 는 층을 세 주지 않아서, 듣는 사람이 지금 몇 층인지 모른다. 대피
+        // 중에 알아야 하는 것은 이동량이 아니라 **남은 층수**다.
+        if (descent.current && !descent.current.done) {
+          const r = descent.current.push(change);
+          setDescentState(r);
+          if (r.say) {
+            if (r.alarm) chimeWrong();
+            speak(r.say);
+          }
+          return;
+        }
+        // 대피 전(층을 옮겨 다니는 중)에는 알리기만 한다. 도면 모델이 한
+        // 층짜리라 도면 교체는 아직 못 한다.
+        speak(change.kind === 'elevator'
+          ? `엘리베이터로 ${Math.abs(change.floors)}개 층 이동했습니다.`
+          : `계단으로 ${Math.abs(change.floors)}개 층 이동했습니다.`);
+      });
+    }).catch(() => {});
+
+    // 자력계 — 지문이 있는 도면에서만 쓰인다. 값만 받아 두고 걸음마다 넣는다.
+    let magSub = null;
+    Magnetometer.isAvailableAsync().then(ok => {
+      if (!ok || !alive) return;
+      Magnetometer.setUpdateInterval(200);
+      magSub = Magnetometer.addListener(({ x, y, z }) => {
+        // 크기만 쓴다 — 폰을 어떻게 들든 같은 값이라 자세와 무관해진다
+        magUt.current = Math.sqrt(x * x + y * y + z * z);
+      });
+    }).catch(() => {});
+
     return () => {
       alive = false;
+      clearInterval(reportTimer);
       clearInterval(timer);
       clearInterval(hazardTimer);
+      clearInterval(scanTimer);
+      baroSub?.remove?.();
+      magSub?.remove?.();
       haptic.stop();
       sensor.stop();
       odo.stop();
       stopSpeaking();
     };
   }, []);
+
+  // 사진 시나리오는 **서버 시계가 위치 센서**다. 휴대폰과 관제가 각자 90초
+  // 애니메이션을 돌리면 프레임·절전·네트워크 차이만큼 반드시 어긋난다. 서버가
+  // 계산한 같은 좌표를 0.25초마다 받아 지도·거리·방향 안내기를 함께 이동한다.
+  useEffect(() => {
+    if (!scenario) return undefined;
+    let alive = true;
+    let busy = false;
+
+    const applySnapshot = snapshot => {
+      if (!alive || !snapshot || !Number.isFinite(snapshot.progress)) return;
+      const f = followerRef.current;
+      f.seekProgress(snapshot.progress);
+      const d = f.describe();
+      setScenarioPosition({
+        x: snapshot.x,
+        y: snapshot.y,
+        progress: snapshot.progress,
+        beacons: snapshot.beacons,
+      });
+      setInfo({
+        ...d,
+        stepsLeft: snapshot.stepsLeft,
+        metersLeft: Math.min(d.metersLeft, snapshot.remainingMeters),
+        totalMetersLeft: snapshot.remainingMeters,
+      });
+
+      if (snapshot.phase === 'arrived' && !scenarioFinished.current) {
+        scenarioFinished.current = true;
+        finish();
+      }
+    };
+
+    const sync = async start => {
+      if (busy || !alive) return;
+      busy = true;
+      try {
+        const snapshot = start
+          ? await api?.startPhotoScenarioTimeline?.()
+          : await api?.getPhotoScenarioTimeline?.();
+        applySnapshot(snapshot);
+      } finally {
+        busy = false;
+      }
+    };
+
+    sync(true);
+    const timer = setInterval(() => sync(false), 250);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [scenario]);
 
   /** 마지막으로 한 말을 기억해 둔다 — 화면을 누르면 다시 들려준다 */
   function speak(text) {
@@ -226,12 +470,118 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
       toValue: e ?? 0, duration: TICK_MS, easing: Easing.linear, useNativeDriver: true,
     }).start();
 
-    if (odo.confidence < CONFIDENCE_FLOOR) safeHold('위치를 확인할 수 없습니다.');
+    // 경로를 벗어났나 — 신호가 말하는 통로와 경로 추종이 믿는 통로가 다르면.
+    //
+    // 경로 추종은 "걸었으니 갔겠지"로 미는 값이라 **어긋나면 대개 그쪽이 틀렸다.**
+    // 다만 확신이 있을 때만 판단하고(`offRoute` 안에서 거른다), 잠깐 어긋난 것으로
+    // 흔들지 않도록 몇 초 이어질 때만 재탐색한다.
+    const onEdge = f.position()?.edgeId ?? null;
+    if (!scenario && tracking.offRoute(onEdge)) {
+      if (!offRouteSince.current) offRouteSince.current = Date.now();
+      else if (Date.now() - offRouteSince.current > OFF_ROUTE_MS) {
+        offRouteSince.current = 0;
+        rerouteFromHere();
+      }
+    } else {
+      offRouteSince.current = 0;
+    }
+
+    // 확신도가 **내리** 낮을 때만 멈춘다. 한 틱 떨어졌다고 멈추면 갈림길마다
+    // 안내가 끊긴다 — 시뮬레이션에서 교차점마다 몇 걸음씩 떨어졌다가 회복됐다.
+    if (tracking.confidence() < CONFIDENCE_FLOOR) {
+      if (!lowConfSince.current) lowConfSince.current = Date.now();
+      else if (Date.now() - lowConfSince.current > LOW_CONF_MS) {
+        safeHold('위치를 확인할 수 없습니다.');
+      }
+    } else {
+      lowConfSince.current = 0;
+    }
+  }
+
+  // ---------------------------------------------------- 관제로 위치 보고
+  /**
+   * 지금 위치를 서버에 올린다 — 관제 지도의 점이 이 값으로 움직인다.
+   *
+   * 걸음마다 보내면 관제에서 점이 뚝뚝 끊겨 보인다. 사람은 초당 두 걸음쯤 걷고
+   * 그 사이 실제로는 부드럽게 이동하므로, **일정 주기로도 함께 보낸다**.
+   * (부드럽게 잇는 건 관제 쪽에서 보간한다)
+   *
+   * 실패는 무시한다. 위치 보고가 안 된다고 안내를 멈추면 본말이 전도된다.
+   */
+  function report(phase) {
+    // 자동 시나리오에서 앱 고유 userId로 위치를 다시 쓰면 관제에 두 번째 사람이
+    // 생긴다. 공용 시나리오 위치는 서버 타임라인 하나만 쓴다.
+    if (scenario) return;
+    const f = followerRef.current;
+    if (!f) return;
+    const pos = f.position();
+    const d = f.describe();
+    api?.updatePosition?.(userId.current, {
+      nodeId: pos?.fromNodeId ?? startNode?.id ?? null,
+      nodeName: d.targetName,
+      // 계단 앞은 «대피 완료» 가 아니다. 밖으로 나와야 arrived 다 —
+      // 관제의 «대피 완료» 숫자가 계단참에 서 있는 사람을 세면,
+      // 구조대가 아직 건물 안에 있는 사람을 뺀 채로 판단하게 된다.
+      phase: phase
+        || (descent.current?.done ? 'arrived'
+          : arrived ? 'stairs'
+            : halted.current ? 'safehold' : 'guiding'),
+      x: pos?.x, y: pos?.y,
+      edgeId: pos?.edgeId ?? null,
+      progress: pos?.progress ?? 0,
+      // 판단 계층이 낸 값이다. 걸음만 세던 예전 값과 달리 비콘·기압·지자기가
+      // 함께 들어가 있고, 증거 없이 오래 걸으면 스스로 떨어진다.
+      confidence: tracking.confidence(),
+      source: tracking.source(),        // 'beacon' | 'barometer' | 'magnetic' | 'pdr'
+      // **어느 쪽을 보고 있나.** 관제가 «저 사람 반대로 서 있다» 를 볼 수 있어야 하고,
+      // 무엇보다 화면의 부채꼴과 경로선이 어긋날 때 그걸 잴 길이 이것뿐이다.
+      // 자북 기준 그대로 보낸다 — 도면 기준으로 바꾸는 일은 받는 쪽이 한다.
+      heading: Number.isFinite(sensor.heading) ? sensor.heading : null,
+      headingStable: sensor.stability >= STABILITY_FLOOR,
+      exitName: d.exitName,
+      stepsLeft: d.stepsLeft,
+      routeNodes: route?.nodes || null,
+      routeEdges: route?.edges || null,
+    });
   }
 
   // ---------------------------------------------------- 한 걸음
   function onStep() {
-    if (halted.current || arrived) return;
+    if (arrived) return;
+    // 사진 시나리오는 실제 걸음 수와 관계없이 정확히 90초에 도착한다.
+    if (scenario) return;
+
+    // **안전상태에서도 걸음은 센다.**
+    //
+    // 예전에는 여기서 halted 를 보고 통째로 돌아갔는데, 그러면 빠져나갈 길이
+    // 없어진다: 확신도가 떨어져 안전상태에 들어가면 → 걸음이 무시되고 →
+    // 판단 계층이 안 움직이고 → 확신도가 영영 회복되지 않는다. 실제로 이것 때문에
+    // 걸어도 위치가 「출구」에 붙박여 있었다.
+    //
+    // 안전상태는 **안내를 멈추는 것**이지 센서를 끄는 것이 아니다. 계속 세다가
+    // 위치를 되찾으면 안내를 다시 시작한다.
+    // 제자리에서 도는 중인가 — 방위가 빠르게 변하면 걸음이 아니라 회전이다
+    const nowMs = Date.now();
+    const mark = headingMark.current;
+    let turning = false;
+    if (Number.isFinite(sensor.heading)) {
+      if (mark && nowMs > mark.t) {
+        const d = Math.abs(((sensor.heading - mark.deg + 540) % 360) - 180);
+        turning = d / ((nowMs - mark.t) / 1000) > TURNING_DPS;
+      }
+      headingMark.current = { deg: sensor.heading, t: nowMs };
+    }
+
+    if (!turning) {
+      tracking.step({ heading: sensor.heading, microTesla: magUt.current });
+      const trustedH = sensor.stability >= STABILITY_FLOOR ? sensor.heading : undefined;
+      walkSim.step(trustedH);
+    }
+    report();
+
+    if (halted.current) { maybeResume(); return; }   // 안내는 아직 멈춘 상태
+    if (turning) return;                              // 제자리 회전 — 방향만 바뀌고 위치는 그대로
+
     const f = followerRef.current;
 
     // 걷는 방향이 곧 그 구간의 실제 방위다. 몇 걸음 곧게 걸으면 보정이 잡힌다.
@@ -243,15 +593,24 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
     if (got) {
       const wasBlind = f.northOffset === null;
       f.setNorthOffset(got.offset);
+      // 판단 계층에도 같은 값을 넣는다 — 이게 빠져 있어서 나침반이 후보를
+      // 감점하는 일을 한 번도 못 했다. 안내기만 알고 있으면 «폰을 돌리세요» 는
+      // 되지만 «어느 갈래로 갔나» 는 여전히 걸음으로만 판단하게 된다.
+      tracking.setNorthOffset(got.offset);
       if (wasBlind) {
         noNorth.current = false;
         chimeGood();
         speak('방향을 잡았습니다. 폰을 돌리면 맞는 쪽에서 진동이 세집니다.');
+        // 서버에도 남긴다 — 건물이 돌아가지 않으니 한 번 재면 끝나는 값이다.
+        // 다음 사람은 곧게 네 걸음을 걷기 전부터 방향 안내를 받는다.
+        if (plan?.id) api?.setPlanNorth?.(plan.id, got.offset, '걸으면서 자동 보정')
+          ?.catch?.(() => {});
       }
     }
 
     const { advanced, arrived: done } = f.step();
     setInfo(f.describe());
+    report();
     if (!advanced) return;
 
     zone.current = null;
@@ -276,6 +635,32 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
     }
   }
 
+  // ---------------------------------------------------- 경로를 벗어났을 때
+  /**
+   * 지금 있는 곳에서 경로를 다시 짠다.
+   *
+   * 출발점을 **판단 계층이 말하는 위치**로 잡는다. 경로 추종이 믿는 위치는 방금
+   * 틀린 것으로 판명된 값이라, 그걸 기준으로 다시 짜면 같은 곳으로 또 안내한다.
+   */
+  async function rerouteFromHere() {
+    if (halted.current || arrived) return;
+    const here = tracking.position()?.nodeId;
+    if (!here) return;
+
+    speak('경로를 벗어났습니다. 지금 계신 곳에서 다시 안내합니다.');
+    const res = await api?.route?.(here, 'reroute');
+    const next = res?.route ?? routeToNearestExit(plan, here);
+    if (!next) return safeHold('여기서 갈 수 있는 안전한 경로가 없습니다.');
+
+    routeRef.current = next;
+    followerRef.current = new RouteFollower(plan, next, followerOptions(walls));
+    zone.current = null;
+    calib.resetSegment();
+    setInfo(followerRef.current.describe());
+    chimeGood();
+    announceSegment(true);
+  }
+
   // ---------------------------------------------------- 불이 번졌을 때
   async function checkHazards() {
     if (halted.current || arrived || !api?.configured) return;
@@ -288,25 +673,77 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
     if (!res?.route) return safeHold('안전한 경로를 찾지 못했습니다.');
 
     routeRef.current = res.route;
-    followerRef.current = new RouteFollower(plan, res.route);
+    followerRef.current = new RouteFollower(plan, res.route, followerOptions(walls));
     zone.current = null;
     setInfo(followerRef.current.describe());
     chimeGood();
     announceSegment(true);
   }
 
+  /**
+   * 비상구에 닿았다 — **여기서 「대피 완료」 라고 말하지 않는다.**
+   *
+   * 눈이 보이는 사람에게는 이 뒤가 문제가 안 된다. 계단이 보이고, 층 번호가
+   * 벽에 적혀 있고, 1층에 닿으면 출입문이 보인다. **셋 다 시각 정보다.**
+   * 시각장애인에게는 하나도 안 오므로, 이 구간이야말로 이 앱이 필요한 곳이다.
+   */
   function finish() {
     setArrived(true);
     haptic.setStrength(0);
     haptic.stop();
     chimeGood();
-    speak(`${followerRef.current.describe().exitName}에 도착했습니다. 계단으로 내려가세요.`);
+    const exitName = followerRef.current.describe().exitName || '비상구';
+    const d = new StairDescent(floorOf(plan?.name), { hasBarometer: baroOk.current });
+    descent.current = d;
+    const r = d.reachExit(exitName);
+    setDescentState(r);
+    speak(r.say);
+  }
+
+  /** 계단을 다 내려와 밖으로 나왔다 — **여기서만 대피 완료다.** */
+  function markOut() {
+    if (!descent.current) return;
+    const r = descent.current.markOut();
+    setDescentState(r);
+    chimeGood();
+    speak(r.say);
+    report({ phase: 'arrived' }).catch(() => {});
+  }
+
+  /** 기압계가 없는 폰에서 사람이 «다 내려왔다» 고 알린다 */
+  function markGround() {
+    if (!descent.current) return;
+    const r = descent.current.markGround();
+    setDescentState(r);
+    speak(r.say);
   }
 
   /**
    * 안내를 멈추고 도움을 요청한다.
    * 위치를 못 믿는 채로 계속 안내하면 사용자를 더 위험한 곳으로 보낼 수 있다.
    */
+  /**
+   * 위치를 되찾았으면 안내를 다시 시작한다.
+   *
+   * 이게 없으면 안전상태가 **막다른 길**이 된다. 실제로 `halted` 를 false 로
+   * 되돌리는 코드가 한 군데도 없어서, 한 번 들어가면 앱을 다시 켜야 했다.
+   * 확신도가 문턱을 **넉넉히** 넘을 때만 푼다 — 문턱 근처에서 오락가락하면
+   * 안내가 켜졌다 꺼졌다 하며 더 혼란스럽다.
+   */
+  function maybeResume() {
+    if (!halted.current || arrived) return;
+    if (tracking.confidence() < CONFIDENCE_FLOOR + 0.2) return;
+
+    halted.current = false;
+    lowConfSince.current = 0;
+    setStopped(false);
+    haptic.start();
+    zone.current = null;
+    chimeGood();
+    speak('위치를 다시 찾았습니다. 안내를 이어갑니다.');
+    announceSegment(true);
+  }
+
   function safeHold(reason) {
     if (halted.current) return;
     halted.current = true;
@@ -325,7 +762,10 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
   const good = align >= 0.92 && !blocked && !stopped;
   const dim = blocked || stopped;
 
-  const side = arrived ? '도착했습니다'
+  const dPhase = descentState?.phase;
+  const side = descent.current?.done ? '대피 완료입니다'
+    : dPhase === DESCENT_PHASE.GROUND ? '건물 밖으로 나가세요'
+    : arrived ? '계단으로 내려가세요'
     : stopped ? '그 자리에서 도움을 요청하세요'
     : blocked || err === null ? '방향 확인 중'
     : Math.abs(err) <= ALIGNED_DEG ? '정면'
@@ -338,6 +778,10 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
       accessibilityRole="button"
       accessibilityLabel="안내 다시 듣기"
     >
+      {/* 안내 화면을 완전히 종료할 때까지 계속 점멸한다. 도착·안전정지 뒤에도
+          주변 사람이 대피자를 찾는 신호는 필요하므로 상태로 끄지 않는다. */}
+      <EmergencyTorch />
+
       {/* 위 — 어디 건물인가 */}
       <View style={styles.header} pointerEvents="none">
         {/* 시연용 도면은 실재하지 않는 건물이다. 시각장애인에게는 음성으로 알렸지만
@@ -370,13 +814,24 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
         accessible
         accessibilityLiveRegion="polite"
         accessibilityLabel={
-          arrived ? `${info?.exitName || '출구'}에 도착했습니다`
-            : `${fmt(info?.metersLeft ?? 0)}미터, ${side}`
+          descent.current?.done ? '대피 완료입니다. 안전한 곳입니다'
+            : arrived
+              ? (Number.isFinite(descentState?.floorsLeft) && descentState.floorsLeft > 0
+                ? `${descentState.floor}층입니다. ${descentState.floorsLeft}개 층 남았습니다`
+                : side)
+              : `${fmt(info?.metersLeft ?? 0)}미터, ${side}`
         }
       >
         <Text style={[styles.distance, good && styles.distanceGood]}>
-          {arrived ? '도착' : fmt(info?.metersLeft ?? 0)}
-          {!arrived && <Text style={styles.unit}>m</Text>}
+          {descent.current?.done ? '완료'
+            : arrived
+              ? (Number.isFinite(descentState?.floorsLeft) && descentState.floorsLeft > 0
+                ? descentState.floorsLeft : '계단')
+              : fmt(info?.metersLeft ?? 0)}
+          {arrived
+            ? (Number.isFinite(descentState?.floorsLeft) && descentState.floorsLeft > 0
+              ? <Text style={styles.unit}>개 층</Text> : null)
+            : <Text style={styles.unit}>m</Text>}
         </Text>
         <Text style={styles.side}>{side}</Text>
         {info && !arrived && (
@@ -386,11 +841,56 @@ export default function GuideScreen({ api, plan, route, startNode, onExit, onSaf
         )}
       </View>
 
+      {/* 동행자·개발자용 지도. 소리와 진동이 본 안내이고 이건 확인용이다. */}
+      {showMap && (
+        <View style={styles.mapWrap} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          <PositionMap
+            plan={plan}
+            route={routeRef.current}
+            tracking={tracking}
+            heading={sensor.stability >= STABILITY_FLOOR ? sensor.heading : null}
+            imageUri={planImage}
+            walls={walls}
+            routePoints={followerRef.current?.path}
+            scenario={scenario}
+            scenarioPosition={scenario ? (scenarioPosition || followerRef.current?.position()) : null}
+            realBeacons={realBeacons.current}
+            mapped={mapped}
+          />
+        </View>
+      )}
+
+      {/* 계단 구간 — **여기서만 나오는 큰 버튼 하나.**
+
+          기계가 층을 못 세는 폰이 있고(기압계 없음), 셀 수 있어도 «밖으로
+          나왔다» 는 기압으로 알 수 없다. 그 마지막 한 걸음은 사람이 알려
+          줘야 하고, 그래야 관제의 «대피 완료» 숫자가 진실이 된다.
+
+          버튼이 크고 하나뿐인 이유: 이 순간 사용자는 계단을 내려온 직후라
+          숨이 차고, 화면을 볼 형편이 아니다. 더듬어 눌러도 맞아야 한다. */}
+      {arrived && !descent.current?.done && (
+        <Pressable
+          style={styles.descentBtn}
+          onPress={dPhase === DESCENT_PHASE.GROUND ? markOut : markGround}
+          accessibilityRole="button"
+          accessibilityLabel={dPhase === DESCENT_PHASE.GROUND
+            ? '건물 밖으로 나왔습니다. 누르면 대피 완료로 기록합니다'
+            : '1층에 도착했습니다. 층이 자동으로 세어지지 않을 때 누르세요'}>
+          <Text style={styles.descentBtnText}>
+            {dPhase === DESCENT_PHASE.GROUND ? '밖으로 나왔습니다' : '1층에 도착했습니다'}
+          </Text>
+        </Pressable>
+      )}
+
       {/* 버튼은 눈이 보이는 사람용. 시각장애인은 화면 아무 데나 누르면 다시 듣는다. */}
       <View style={styles.controls}>
         <Pressable style={styles.circle} onPress={onExit}
                    accessibilityRole="button" accessibilityLabel="안내 종료">
           <Text style={styles.circleIcon}>✕</Text>
+        </Pressable>
+        <Pressable style={styles.circle} onPress={() => setShowMap(v => !v)}
+                   accessibilityRole="button" accessibilityLabel="지도 보기 전환">
+          <Text style={styles.circleIcon}>🗺️</Text>
         </Pressable>
         <Pressable style={styles.circle} onPress={repeat}
                    accessibilityRole="button" accessibilityLabel="안내 다시 듣기">
@@ -428,6 +928,9 @@ const styles = StyleSheet.create({
   place: { color: '#fff', fontSize: 26, fontWeight: '700', letterSpacing: -0.5 },
 
   arrowArea: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  // 높이를 명시해야 한다. Svg 의 height prop 만으로는 부모가 크기를 못 잡아
+  // flex 컨테이너 안에서 0 으로 접힌다 — 실제로 그래서 지도가 안 보였다.
+  mapWrap: { height: 210, marginBottom: 12, flexShrink: 0 },
   arrowWrap: { alignItems: 'center' },
   arrowHead: {
     width: 0, height: 0, backgroundColor: 'transparent',
@@ -445,6 +948,13 @@ const styles = StyleSheet.create({
   dest: { color: '#5a5a5f', fontSize: 15, marginTop: 6 },
 
   controls: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 18 },
+  // 계단을 내려온 직후에 누르는 버튼이라 크고 하나뿐이다 — 숨이 차고
+  // 화면을 볼 형편이 아닌 사람이 더듬어 눌러도 맞아야 한다.
+  descentBtn: {
+    marginTop: 16, paddingVertical: 22, borderRadius: 16,
+    alignItems: 'center', backgroundColor: theme.ok,
+  },
+  descentBtnText: { color: '#04121f', fontSize: 20, fontWeight: '800' },
   circle: {
     width: 62, height: 62, borderRadius: 31, backgroundColor: '#1c1c1e',
     alignItems: 'center', justifyContent: 'center',

@@ -8,7 +8,7 @@ import { EventEmitter } from 'node:events';
 export const events = new EventEmitter();
 events.setMaxListeners(0); // 동시 접속 사용자 수만큼 리스너가 붙는다
 
-export const TOPICS = ['hazards', 'sos', 'positions', 'metrics', 'alerts', 'sensors', 'plan'];
+export const TOPICS = ['hazards', 'sos', 'positions', 'metrics', 'alerts', 'sensors', 'plan', 'beaconMap', 'beaconFix'];
 
 export function publish(topic, payload) {
   events.emit(topic, payload);

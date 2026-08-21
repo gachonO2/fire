@@ -413,6 +413,64 @@ export async function readPlanFromImage(dataUri, size = {}) {
  * 예전 경로 — 탐지기 없이 언어모델이 좌표까지 전부 읽는다.
  * @param why  왜 탐지기 없이 읽는지. 사람이 검수 방식을 정하는 데 쓰는 정보다.
  */
+/**
+ * 언어모델이 읽은 도면의 **출구 좌표를 탐지기 값으로 바로잡는다.**
+ *
+ * 이 건물 도면에서 탐지기는 출구를 10곳 정확히 찍는다 — 초록 픽토그램이
+ * 계단에 붙어 있고, 그게 바로 대피 출구다. 반면 방은 어떤 문턱에서도 못
+ * 찾는다(학습한 양식은 방이 네모 상자인데 이 도면은 선 칸막이다).
+ *
+ * 그래서 **역할이 정확히 갈린다**: 출구는 탐지기가, 방·이름·통로는 언어모델이.
+ * 처음에는 방을 못 찾으면 탐지기 결과를 통째로 버렸는데, 그건 잘 하는 것까지
+ * 같이 버리는 짓이었다.
+ *
+ * 좌표만 옮기고 **지점을 새로 만들지는 않는다.** 새 출구를 넣으려면 통로도
+ * 이어야 하는데, 잘못 이으면 없는 길이 생겨 시각장애인이 벽으로 걸어간다.
+ * 옮기는 것은 되돌릴 수 있지만 없는 길은 그렇지 않다.
+ */
+function snapExitsToDetector(plan, detectorNodes, size) {
+  // **좌표계를 맞춘다.** 탐지기는 0~1 정규화 값을 주고 도면은 픽셀이다.
+  // 이걸 안 맞추면 거리 비교가 통째로 의미를 잃는다 — 처음에 그래서 한 곳도
+  // 안 옮겨졌고, 로그에는 «맞췄습니다» 도 안 찍혀 조용히 지나갔다.
+  const W = size?.width || 1000;
+  const H = size?.height || 1000;
+  const exits = (detectorNodes || [])
+    .filter(n => n.type === 'exit' && Number.isFinite(n.x))
+    .map(n => ({ x: n.x <= 1 ? n.x * W : n.x, y: n.y <= 1 ? n.y * H : n.y }));
+  const mine = (plan?.nodes || []).filter(n => n.type === 'exit');
+  if (!exits.length || !mine.length) return plan;
+
+  // 도면 크기의 8% 안쪽이라야 «같은 출구» 로 본다. 멀리 있는 것에 갖다 붙이면
+  // 출구가 엉뚱한 자리로 옮겨가고, 그건 안 옮긴 것보다 나쁘다.
+  const span = Math.max(W, H) || 1000;
+  const limit = span * 0.08;
+
+  let moved = 0;
+  const used = new Set();
+  for (const node of mine) {
+    let best = null;
+    let bestD = Infinity;
+    for (let i = 0; i < exits.length; i++) {
+      if (used.has(i)) continue;
+      const d = Math.hypot(exits[i].x - node.x, exits[i].y - node.y);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    if (best !== null && bestD <= limit && bestD > 1) {
+      node.x = exits[best].x;
+      node.y = exits[best].y;
+      used.add(best);
+      moved++;
+    }
+  }
+  console.log(`  출구 좌표 맞춤: ${moved}/${mine.length}곳 (탐지기 ${exits.length}곳 중)`);
+  if (moved) {
+    plan.notes = [`출구 ${moved}곳의 좌표를 탐지기 값으로 맞췄습니다`, plan.notes]
+      .filter(Boolean).join(' · ');
+    plan.engine = `기호 탐지기(출구) + ${providerLabel()}`;
+  }
+  return plan;
+}
+
 async function readWithModelOnly(parsed, size, why = '기호 탐지기가 꺼져 있어') {
   // 그림이 모델에 닿지 않으면 판독을 **시작하지 않는다.**
   // 못 본 채로 지어낸 도면이 돌아오면 사람이 알아채기 어렵다 — 그럴듯하기 때문이다.
@@ -464,6 +522,24 @@ async function readWithDetector(detected, parsed, size, hasReader) {
       ),
       { status: 422 },
     );
+  }
+
+  // **방을 하나도 못 찾았으면 언어모델에 맡긴다.**
+  //
+  // 탐지기가 켜지면 그 좌표가 지점의 근거가 된다. 그래서 방을 못 찾으면
+  // 방 지점이 통째로 없는 도면이 나온다 — 출구만 8곳 있고 «302호 앞» 이
+  // 하나도 없다. 대피 안내는 사람이 있는 곳에서 시작하므로 그런 도면으로는
+  // 안내를 시작할 수가 없다.
+  //
+  // 실제로 COCONE 6층 도면이 그랬다. 학습한 피난안내도는 방이 네모 상자로
+  // 그려진 양식인데, 이 도면은 선 칸막이에 글자만 있어서 `room` 이 0개였다.
+  // 결과가 지점 42개에서 17개로 줄었다.
+  //
+  // 출구 좌표는 탐지기가 더 정확하지만, **방이 없는 것보다는 낫다.**
+  if (!roomBoxes?.length && hasReader) {
+    const plan = await readWithModelOnly(parsed, size,
+      `탐지기가 출구를 찾았지만 방을 못 찾아`);
+    return snapExitsToDetector(plan, nodes, size);
   }
 
   const detectorNote = `기호 ${nodes.length}곳을 탐지기가 찾았습니다`;

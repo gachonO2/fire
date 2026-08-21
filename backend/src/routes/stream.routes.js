@@ -35,6 +35,8 @@ streamRoutes.get('/stream', async (req, res) => {
     sos: list => (watchedUserId ? mine(list) : list),
     alerts: list => (watchedUserId ? mine(list) : list),
     metrics: list => (watchedUserId ? [] : list), // 운영 지표는 보호자에게 노출하지 않는다
+    beaconMap: list => (watchedUserId ? [] : list), // 답사 결과는 관제만 본다
+    beaconFix: f => f,                              // 실제 전파가 잡은 지점 — 폰이 앵커로 쓴다
   };
 
   res.set({
@@ -46,8 +48,16 @@ streamRoutes.get('/stream', async (req, res) => {
   res.flushHeaders();
 
   const send = (topic, data) => {
-    res.write(`event: ${topic}\n`);
-    res.write(`data: ${JSON.stringify(scope[topic](data))}\n\n`);
+    // 여기서 던지면 EventEmitter 가 예외를 그대로 올려 **서버 프로세스가 죽는다.**
+    // 실제로 새 주제를 추가하면서 scope 에 넣는 것을 빠뜨렸다가 백엔드가 내려갔다.
+    // 화면 하나에 보내는 데 실패한 것이 전체를 멈출 이유는 없다.
+    try {
+      const shape = scope[topic] || (v => v);
+      res.write(`event: ${topic}\n`);
+      res.write(`data: ${JSON.stringify(shape(data))}\n\n`);
+    } catch (e) {
+      console.warn(`[stream] ${topic} 전송 실패:`, e?.message);
+    }
   };
 
   const annotate = sensors => {

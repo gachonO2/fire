@@ -66,7 +66,8 @@ export default function StartScreen({ plan, recentId, onPick, onCancel }) {
           도면에 방이 표시돼 있어야 시작 위치를 고를 수 있습니다.
           관리자에게 도면 등록을 요청하세요.
         </Text>
-        <Pressable style={styles.cancel} onPress={onCancel} accessibilityRole="button">
+        <Pressable style={styles.cancel} onPress={onCancel}
+                   accessibilityRole="button" accessibilityLabel="돌아가기">
           <Text style={styles.cancelText}>돌아가기</Text>
         </Pressable>
       </View>

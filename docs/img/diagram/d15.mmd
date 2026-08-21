@@ -1,0 +1,13 @@
+flowchart TB
+  IN["도면 사진 (dataUri)"] --> CHK{"판독기 구성?"}
+  CHK -- "둘 다 없음" --> MANUAL["판독 없이<br/>손으로 그리기"]
+  CHK -- "있음" --> DET{"탐지기 living?"}
+  DET -- "예" --> Y["YOLO 2벌 추론<br/>→ 클래스별 NMS<br/>→ 정규화 상자"]
+  DET -- "아니오 (null, 예외 아님)" --> LLMONLY
+  Y --> GR["graph.js: 상자→지점·통로<br/>· 소화기 등 비지점 제외<br/>· 실(방) 사각형 관통 연결 거부"]
+  GR --> LLM{"언어모델?"}
+  LLMONLY["언어모델 단독<br/>(좌표까지 판독)"] --> MERGE
+  LLM -- "예" --> NAME["이름·통로 연결 얹기<br/>(좌표 재질문 금지)"] --> MERGE["병합"]
+  LLM -- "아니오" --> GEO["기하학적 통로 추정<br/>이름은 번호 부여"] --> MERGE
+  MERGE --> VAL["검증·정리<br/>· 없는 노드 가리키는 통로/범위 밖 좌표는 버리고 **무엇을 버렸는지 알림**<br/>· exit 0개 → stair 승격 + 경고<br/>· room 0개 → 경고"]
+  VAL --> OUT["편집기에 초안 표시<br/>신뢰도(high/medium/low)·메모·엔진 조합<br/>**저장되지 않는다 — 사람이 확인 후 저장**"]

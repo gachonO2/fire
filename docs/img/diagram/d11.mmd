@@ -1,0 +1,13 @@
+flowchart TB
+  subgraph NORMAL["평소 (도면 수집)"]
+    CAP["CaptureScreen<br/>피난안내도 촬영"] --> REV["ReviewScreen<br/>찍은 사진 확인"]
+    REV --> SUB["SubmitScreen<br/>가로 폭·방위 입력 → 서버 접수"]
+  end
+  subgraph FIRE["화재"]
+    AL["AlarmScreen<br/>전체 덮음 — 사이렌·진동·음성·손전등"]
+    AL --> LOC{"비콘 위치 판정"}
+    LOC -- "성공 (묻지 않는다)" --> GU["GuideScreen<br/>진동·소리 구간 안내"]
+    LOC -- "실패 (예외)" --> STT["StartScreen<br/>'지금 계신 곳은?' 목록"]
+    STT --> GU
+  end
+  NORMAL -. "화재 감지 (phase 전환)" .-> AL
