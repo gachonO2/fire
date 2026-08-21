@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "dev": "node scripts/dev-server.mjs",
+    "dev:all": "npm run sync && node scripts/start-all.mjs",
     "dev:backend": "node --watch backend/src/server.js",
     "sync": "node scripts/sync-shared.mjs",
     "sync:app": "node scripts/sync-app.mjs",
