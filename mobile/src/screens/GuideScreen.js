@@ -36,7 +36,7 @@ import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-nativ
 
 import { Barometer, Magnetometer } from 'expo-sensors';
 
-import { BearingSensor, alignment, proximity, ALIGNED_DEG } from '../bearing';
+import { BearingSensor, alignment, proximity, ALIGNED_DEG, WIDE_DEG } from '../bearing';
 import { Tracking } from '../tracking';
 import { DESCENT_PHASE, StairDescent, floorOf } from '../stair-descent';
 import { WalkSim } from '../walk-sim';
@@ -760,6 +760,30 @@ export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
     inputRange: [-180, 180], outputRange: ['-180deg', '180deg'],
   });
   const good = align >= 0.92 && !blocked && !stopped;
+
+  /**
+   * 화살표 색 — **얼마나 틀어졌는가**를 색으로 말한다.
+   *
+   * 여태 두 가지뿐이었다: 맞으면 초록, 아니면 흰색. 그런데 «아니면» 안에
+   * 20도 어긋난 것과 180도 뒤돌아선 것이 같이 들어 있었다. 화면을 보는
+   * 사람(동행자·저시력자)에게 그 둘은 전혀 다른 상황인데 같은 색이었다.
+   *
+   *   초록   맞다. 그대로 걸으세요
+   *   주황   조금 틀어졌다. 몸을 살짝 돌리세요
+   *   빨강   많이 틀어졌다. 크게 돌아야 한다
+   *
+   * 문턱은 이미 있는 값을 쓴다 — `ALIGNED_DEG`(16도) 안쪽이 «맞음»,
+   * `WIDE_DEG`(75도) 밖이 «많이 틀어짐». 새 숫자를 만들지 않는 이유는,
+   * 진동·소리 안내가 이미 그 값으로 갈리고 있어서 화면만 다른 기준을 쓰면
+   * 눈과 귀가 서로 다른 말을 하게 되기 때문이다.
+   *
+   * 방향을 못 믿는 상태(`blocked`)나 멈춘 상태에서는 색을 안 쓴다 —
+   * 그때 초록이든 빨강이든 «방향» 을 말하는 것이 되고, 그건 거짓말이다.
+   */
+  const arrowColor = (blocked || stopped || err === null) ? '#fff'
+    : good ? theme.ok
+      : Math.abs(err) <= WIDE_DEG ? theme.warn
+        : theme.danger;
   const dim = blocked || stopped;
 
   const dPhase = descentState?.phase;
@@ -803,7 +827,7 @@ export default function GuideScreen({ api, plan, route, walls: wallsProp = null,
           <Text style={styles.check}>✓</Text>
         ) : (
           <Animated.View style={{ transform: [{ rotate: spin }], opacity: dim ? 0.22 : 1 }}>
-            <Arrow color={good ? theme.ok : '#fff'} />
+            <Arrow color={arrowColor} />
           </Animated.View>
         )}
       </View>
